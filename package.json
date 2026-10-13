@@ -1,0 +1,103 @@
+{
+  "name": "cloud-asset-hub",
+  "cnname": "云资产管理工具",
+  "version": "0.1.8",
+  "cdnPath": "",
+  "description": "云资产管理工具（多云 AK / 对象存储 / 控制台接管 / 告警 / RDS）",
+  "main": "electron/main.js",
+  "author": "yz0x1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yz0x1/cloud-asset-hub.git"
+  },
+  "homepage": "https://github.com/yz0x1/cloud-asset-hub",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "electron": "electron .",
+    "start": "concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "pack": "vite build && electron .",
+    "dist": "vite build && electron-builder --dir",
+    "dist:win": "vite build && electron-builder --win",
+    "dist:portable": "vite build && electron-builder --win portable",
+    "dist:nsis": "vite build && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.yz0x1.cloudassethub",
+    "productName": "云资产管理工具",
+    "copyright": "Copyright © 2026 yz0x1",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "build/icon.*",
+      "package.json"
+    ],
+    "asar": true,
+    "extraMetadata": {
+      "main": "electron/main.js"
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "云资产管理工具",
+      "uninstallDisplayName": "云资产管理工具",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.exe"
+    }
+  },
+  "dependencies": {
+    "@alicloud/pop-core": "^1.7.13",
+    "@ucloud-sdks/ucloud-sdk-js": "^0.2.55",
+    "ali-oss": "^6.23.0",
+    "aws-sdk": "^2.1692.0",
+    "axios": "^1.20.0",
+    "call-bind-apply-helpers": "^1.0.2",
+    "cos-nodejs-sdk-v5": "^2.15.4",
+    "element-plus": "^2.8.4",
+    "pinia": "^2.2.4",
+    "qingstor-sdk": "^3.1.4",
+    "qiniu": "^7.15.2",
+    "tencentcloud-sdk-nodejs": "^4.1.325",
+    "upyun": "^3.4.6",
+    "vue": "^3.5.11",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "concurrently": "^9.0.1",
+    "electron": "^28.3.3",
+    "electron-builder": "^25.1.8",
+    "vite": "^5.4.8",
+    "wait-on": "^8.0.1"
+  }
+}

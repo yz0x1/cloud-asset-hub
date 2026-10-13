@@ -1,0 +1,40 @@
+# dependencies / build
+node_modules/
+dist/
+release/
+out/
+
+# logs / caches
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.vite/
+.cache/
+
+# env / secrets — never commit
+.env
+.env.*
+!.env.example
+*secret*
+*credential*
+akmanage-data.json
+
+# editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# packages / maps
+*.exe
+*.blockmap
+*.dmg
+*.AppImage
+*.snap
+
+# local misc
+*.local
+.tmp/
+temp/
+
+scripts/_login_form_out.txt

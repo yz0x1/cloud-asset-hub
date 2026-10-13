@@ -1,0 +1,6 @@
+{
+  "version": "0.1.3-rebuilt",
+  "asar": "app.asar",
+  "force": false,
+  "notes": "示例更新说明：修复若干问题"
+}
