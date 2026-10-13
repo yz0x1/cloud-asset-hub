@@ -19,31 +19,6 @@
 
 > 资产数据保存在本机 `%APPDATA%\king-akmanage\`，**不会**打进安装包，也不会进入本仓库。
 
-## 环境要求
-
-- Windows 10/11（当前主要支持）
-- Node.js 18+（开发 / 打包）
-
-## 开发
-
-```bash
-git clone https://github.com/yz0x1/cloud-asset-hub.git
-cd cloud-asset-hub
-npm install
-npm start
-```
-
-| 命令 | 说明 |
-|------|------|
-| `npm start` | 开发态（Vite + Electron） |
-| `npm run dev` | 仅前端 |
-| `npm run build` | 前端生产构建 |
-| `npm run dist:win` | 打 Windows 安装包 + portable |
-
-产物目录：`release/`（已在 `.gitignore` 中，默认不上传）。
-
-更多说明见 [docs/RELEASE.md](docs/RELEASE.md)、[docs/FEATURE_SPEC.md](docs/FEATURE_SPEC.md)。
-
 ## 安全提示
 
 - 请勿把真实 AK/SK 提交到 Git

@@ -4,6 +4,9 @@ dist/
 release/
 out/
 
+# local docs (not published)
+docs/
+
 # logs / caches
 *.log
 npm-debug.log*
