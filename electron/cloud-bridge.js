@@ -636,6 +636,253 @@ async function httpRequest({ url, method = 'GET', headers = {}, body = '' }) {
   return typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
 }
 
+function normalizeAiBase(baseUrl) {
+  return String(baseUrl || '').trim().replace(/\/+$/, '')
+}
+
+function aiAuthHeaders(apiKey, organization) {
+  const headers = {
+    Authorization: 'Bearer ' + String(apiKey || '').trim(),
+    'Content-Type': 'application/json'
+  }
+  if (organization) headers['OpenAI-Organization'] = String(organization)
+  return headers
+}
+
+function parseAiBody(data) {
+  if (data == null) return null
+  if (typeof data === 'object') return data
+  try { return JSON.parse(data) } catch { return { raw: String(data) } }
+}
+
+function aiErrorMessage(status, body) {
+  if (body && typeof body === 'object') {
+    const msg = body.error?.message || body.message || body.msg
+    if (msg) return String(msg)
+  }
+  return 'HTTP ' + status
+}
+
+function aiAxiosError(err, url) {
+  const code = err.code || err.cause?.code
+  if (code === 'ECONNABORTED' || /timeout/i.test(String(err.message || ''))) {
+    return new Error('请求超时（请检查 Base URL 是否可达、网络/代理是否正常）：' + url)
+  }
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return new Error('DNS 解析失败：' + url)
+  }
+  if (code === 'ECONNREFUSED') {
+    return new Error('连接被拒绝：' + url)
+  }
+  if (code === 'CERT_HAS_EXPIRED' || code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE') {
+    return new Error('证书校验失败：' + url)
+  }
+  return new Error(String(err.message || err) + ' @ ' + url)
+}
+
+/** 部分中转站无视 stream:false，返回 SSE；从中拼出文本 */
+function parseSseChatText(text) {
+  const chunks = String(text || '').split('\n')
+  let content = ''
+  let model = ''
+  const events = []
+  for (const line of chunks) {
+    const s = line.trim()
+    if (!s.startsWith('data:')) continue
+    const payload = s.slice(5).trim()
+    if (!payload || payload === '[DONE]') continue
+    try {
+      const j = JSON.parse(payload)
+      events.push(j)
+      if (j.model) model = j.model
+      const delta = j.choices?.[0]?.delta?.content
+        || j.choices?.[0]?.message?.content
+        || j.choices?.[0]?.text
+        || ''
+      if (delta) content += delta
+    } catch {}
+  }
+  return { content, model, events }
+}
+
+function safeClone(obj) {
+  try { return JSON.parse(JSON.stringify(obj)) } catch { return null }
+}
+
+/** request_id -> AbortController，供试调「取消」 */
+const aiAbortMap = new Map()
+
+function beginAiAbort(requestId) {
+  if (!requestId) return undefined
+  const prev = aiAbortMap.get(requestId)
+  if (prev) {
+    try { prev.abort() } catch {}
+  }
+  const ac = new AbortController()
+  aiAbortMap.set(String(requestId), ac)
+  return ac.signal
+}
+
+function endAiAbort(requestId) {
+  if (!requestId) return
+  aiAbortMap.delete(String(requestId))
+}
+
+function aiAbort(requestId) {
+  const id = String(requestId || '')
+  if (!id) return { aborted: false }
+  const ac = aiAbortMap.get(id)
+  if (!ac) return { aborted: false }
+  try { ac.abort() } catch {}
+  aiAbortMap.delete(id)
+  return { aborted: true }
+}
+
+async function aiAxios(config, requestId) {
+  const axios = require('axios')
+  const signal = beginAiAbort(requestId)
+  try {
+    return await axios({
+      timeout: 60000,
+      maxRedirects: 5,
+      transitional: { clarifyTimeoutError: true },
+      validateStatus: () => true,
+      signal,
+      ...config
+    })
+  } catch (err) {
+    if (err.code === 'ERR_CANCELED' || err.name === 'CanceledError' || err.name === 'AbortError') {
+      throw new Error('已取消请求')
+    }
+    throw aiAxiosError(err, config.url || '')
+  } finally {
+    endAiAbort(requestId)
+  }
+}
+
+/** OpenAI Compatible: GET /models */
+async function aiListModels({ base_url, api_key, organization, request_id }) {
+  const base = normalizeAiBase(base_url)
+  if (!base) throw new Error('缺少 base_url')
+  if (!api_key) throw new Error('缺少 api_key')
+  const url = base + '/models'
+  const started = Date.now()
+  const res = await aiAxios({
+    url,
+    method: 'GET',
+    headers: aiAuthHeaders(api_key, organization),
+    timeout: 30000,
+    responseType: 'text'
+  }, request_id)
+  const body = parseAiBody(res.data)
+  if (res.status >= 400) throw new Error(aiErrorMessage(res.status, body))
+  const models = Array.isArray(body?.data)
+    ? body.data.map((m) => m.id || m.name || String(m)).filter(Boolean)
+    : []
+  return { models, count: models.length, ms: Date.now() - started, raw: safeClone(body) }
+}
+
+/** OpenAI Compatible: POST /chat/completions */
+async function aiChatCompletions({ base_url, api_key, organization, model, messages, temperature, request_id }) {
+  const base = normalizeAiBase(base_url)
+  if (!base) throw new Error('缺少 base_url')
+  if (!api_key) throw new Error('缺少 api_key')
+  if (!model) throw new Error('缺少 model')
+  const url = base + '/chat/completions'
+  const started = Date.now()
+  const res = await aiAxios({
+    url,
+    method: 'POST',
+    headers: {
+      ...aiAuthHeaders(api_key, organization),
+      Accept: 'application/json'
+    },
+    data: {
+      model,
+      messages: messages || [{ role: 'user', content: 'ping' }],
+      temperature: temperature == null ? 0.7 : temperature,
+      stream: false
+    },
+    timeout: 60000,
+    responseType: 'text'
+  }, request_id)
+
+  const rawText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data)
+  const ct = String(res.headers?.['content-type'] || '')
+  const looksSse = ct.includes('text/event-stream') || /^\s*data:/m.test(rawText)
+
+  if (res.status >= 400) {
+    const body = parseAiBody(rawText)
+    throw new Error(aiErrorMessage(res.status, body))
+  }
+
+  if (looksSse) {
+    const sse = parseSseChatText(rawText)
+    return {
+      content: String(sse.content || ''),
+      model: sse.model || model,
+      usage: null,
+      ms: Date.now() - started,
+      raw: safeClone({ stream: true, events: sse.events?.slice?.(0, 20) || [] }),
+      note: '服务端返回了流式 SSE，已自动拼接'
+    }
+  }
+
+  const body = parseAiBody(rawText)
+  if (res.status >= 400) throw new Error(aiErrorMessage(res.status, body))
+  const content = body?.choices?.[0]?.message?.content
+    || body?.choices?.[0]?.text
+    || ''
+  return {
+    content: String(content),
+    model: body?.model || model,
+    usage: body?.usage || null,
+    ms: Date.now() - started,
+    raw: safeClone(body)
+  }
+}
+
+/** 连通探测：优先 listModels，失败则极短 chat */
+async function aiProbe({ base_url, api_key, organization, model, request_id }) {
+  const started = Date.now()
+  try {
+    const listed = await aiListModels({ base_url, api_key, organization, request_id })
+    return {
+      ok: true,
+      via: 'models',
+      models: listed.models,
+      count: listed.count,
+      ms: Date.now() - started
+    }
+  } catch (e1) {
+    if (String(e1.message || e1).includes('已取消')) throw e1
+    const chatModel = model || 'gpt-4o-mini'
+    try {
+      const chat = await aiChatCompletions({
+        base_url,
+        api_key,
+        organization,
+        model: chatModel,
+        messages: [{ role: 'user', content: 'ping' }],
+        temperature: 0,
+        request_id
+      })
+      return {
+        ok: true,
+        via: 'chat',
+        content: chat.content,
+        model: chat.model,
+        ms: Date.now() - started,
+        modelsError: String(e1.message || e1)
+      }
+    } catch (e2) {
+      throw new Error(
+        '探测失败：models=' + String(e1.message || e1) + '；chat=' + String(e2.message || e2)
+      )
+    }
+  }
+}
+
 function qiniuMac({ access_key, secret_key }) {
   const qiniu = require('qiniu')
   return { qiniu, mac: new qiniu.auth.digest.Mac(access_key, secret_key) }
@@ -1231,6 +1478,7 @@ module.exports = {
   ossListBuckets, ossListObjects,
   tencentListUsersRaw, tencentDescribeDomains, huaweiListUsers,
   cosListBuckets, cosListObjects, httpRequest,
+  aiListModels, aiChatCompletions, aiProbe, aiAbort,
   qiniuListBuckets, qiniuListObjects, upyunListDir,
   s3ListBuckets, s3ListObjects,
   qingstorListBuckets, qingstorListObjects,

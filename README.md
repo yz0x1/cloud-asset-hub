@@ -1,6 +1,7 @@
 # Cloud Asset Hub · 云资产管理工具
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/yz0x1/cloud-asset-hub)](https://github.com/yz0x1/cloud-asset-hub/releases)
 [![Electron](https://img.shields.io/badge/Electron-28-blue.svg)](https://www.electronjs.org/)
 [![Vue3](https://img.shields.io/badge/Vue-3-green.svg)](https://vuejs.org/)
 
@@ -10,12 +11,26 @@ Cloud Asset Hub 仅供安全与运维人员在**已获授权**的云账号上进
 
 请遵守相关法律法规及云服务商协议。
 
+## 项目亮点
+
+相对常见云资产小工具（含原版 king-akmanage 一类实现），本仓库补齐了原版缺失或做得不完整的能力，重点如下：
+
+| 亮点 | 说明 |
+|------|------|
+| **批量 / 一键关闭安全告警** | 原版多为单条处理；本版支持多选批量 `HandleSecurityEvents`，以及分页拉取后**一键关闭全部未处理告警**（默认 `ignore`，可改操作码） |
+| **批量告警通知配置** | 支持按通知类型批量改 Route / TimeLimit（含一键静默），不必逐条点开修改 |
+| 多云一体桌面端 | 云存储 + 云服务（AK/SK、接管、RDS、远程命令）+ AI Key 盘点 + 钉钉/飞书，一套 Electron 应用 |
+| Windows 正式分发 | 提供 NSIS 安装包与绿色便携版，开箱即用 |
+
+> 阿里云告警能力基于安全中心 SAS/TDS（`DescribeSuspEvents` / `HandleSecurityEvents` / `ModifyNoticeConfig`），仅对已授权账号使用。
+
 ## 介绍
 
 云安全向桌面工具，主要包含：
 
 - **云存储工具**：对象存储资产接入，文件查看、上传、下载、删除、预览、目录管理等
 - **云服务工具**：多云 AK/SK 管理，控制台接管，子用户查看，以及阿里云 RDS / 告警 / 远程命令等
+- **云AI密钥**：自定义 AI Key 资产（常见模板快捷填入），验证可用性与试调
 - **其他工具**：钉钉 / 飞书 OpenAPI（鉴权、查询、写入等）
 
 ## 软件架构
@@ -26,7 +41,7 @@ Electron + Vue 3 + Element Plus + Node.js
 
 | 云厂商 | 能力 |
 |--------|------|
-| 阿里云 | 控制台接管 / 取消接管、对象存储、远程命令回显、子用户列表、云数据库（RDS）、安全告警与通知配置 |
+| 阿里云 | 控制台接管 / 取消接管、对象存储、远程命令回显、子用户列表、云数据库（RDS）、**安全告警批量处理 / 一键关闭**、告警通知批量配置 |
 | 腾讯云 | 控制台接管 / 取消接管、对象存储、远程命令、子用户列表、域名列表 |
 | 华为云 | 控制台接管 / 取消接管、子用户列表 |
 | ucloud | 控制台接管 / 取消接管、子用户 / 主用户、订单查看 |
@@ -47,7 +62,10 @@ Electron + Vue 3 + Element Plus + Node.js
 - 资产列表：多云 AK/SK 增删改查、本地持久化、导出
 - 控制台接管 / 取消接管 / 接管记录
 - 子用户列表（按厂商能力）
-- 阿里云：告警处理与批量通知配置、RDS 管理、ECS 远程命令
+- 阿里云：
+  - **告警处理**：列表查询、单条 / **多选批量处理**、**一键关闭全部告警**
+  - **告警通知配置**：单条修改 + **批量修改 / 一键静默**
+  - RDS 管理、ECS 远程命令
 - 腾讯云：远程命令、域名列表
 - AWS：策略列表、IAM 相关操作
 - ucloud：订单等信息查询
@@ -56,6 +74,12 @@ Electron + Vue 3 + Element Plus + Node.js
 
 ![云服务工具](info/cloud-server.png)
 
+## 云AI密钥
+
+- 定位：盘点 / 验证挖掘到的 AI Key 是否可用（自定义名称 + Base URL + Key）
+- 常见模板快捷填入：自定义、OpenAI、阿里云百炼、DeepSeek、Moonshot、硅基流动、Ollama
+- 底层统一 OpenAI Compatible；导入 / 导出 JSON；探测状态落库；试调可取消
+
 ## 其他工具
 
 钉钉 / 飞书 OpenAPI：应用凭据、获取 token、用户 / 角色 / 部门 / 知识库查询，以及公告、用户写入等操作。
@@ -63,6 +87,10 @@ Electron + Vue 3 + Element Plus + Node.js
 ### 其他工具 · 钉钉
 
 ![其他工具](info/other-tools.png)
+
+## 下载
+
+请到 [Releases](https://github.com/yz0x1/cloud-asset-hub/releases) 下载最新 Windows 安装包 / 便携版。
 
 ## License
 

@@ -7,6 +7,59 @@ export const CLOUD_VPS = {
   aws: { key: 'aws_cloud', name: 'AWS' }
 }
 
+/**
+ * 云 AI 密钥「快捷模板」——仅用于一键填入名称/Base URL/默认模型
+ * 底层统一走 OpenAI Compatible（/models、/chat/completions），资产本身是自定义条目
+ */
+export const AI_PRESETS = [
+  {
+    key: 'custom',
+    name: '自定义',
+    base_url: '',
+    default_model: '',
+    hint: '中转站 / 自建 / 未知来源 Key，自行填写 Base URL'
+  },
+  {
+    key: 'openai',
+    name: 'OpenAI',
+    base_url: 'https://api.openai.com/v1',
+    default_model: 'gpt-4o-mini'
+  },
+  {
+    key: 'dashscope',
+    name: '阿里云百炼',
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    default_model: 'qwen-plus'
+  },
+  {
+    key: 'deepseek',
+    name: 'DeepSeek',
+    base_url: 'https://api.deepseek.com/v1',
+    default_model: 'deepseek-chat'
+  },
+  {
+    key: 'moonshot',
+    name: 'Moonshot',
+    base_url: 'https://api.moonshot.cn/v1',
+    default_model: 'moonshot-v1-8k'
+  },
+  {
+    key: 'siliconflow',
+    name: '硅基流动',
+    base_url: 'https://api.siliconflow.cn/v1',
+    default_model: 'deepseek-ai/DeepSeek-V3'
+  },
+  {
+    key: 'ollama',
+    name: 'Ollama 本地',
+    base_url: 'http://127.0.0.1:11434/v1',
+    default_model: 'llama3.2'
+  }
+]
+
+/** @deprecated 兼容旧引用 */
+export const AI_PROVIDERS = AI_PRESETS
+
 export const STORAGE_PROVIDERS = [
   { key: 'qiniu', name: '七牛云', features: ['urlUpload','customDomain','imageStyle','manualPrivateBucket','paging','refreshCDN'] },
   { key: 'tencent', name: '腾讯云', features: ['urlUpload','paging'] },

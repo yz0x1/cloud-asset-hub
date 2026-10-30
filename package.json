@@ -1,9 +1,9 @@
 {
   "name": "cloud-asset-hub",
-  "cnname": "云资产管理工具",
-  "version": "0.1.8",
+  "cnname": "Cloud Asset Hub",
+  "version": "0.2.0",
   "cdnPath": "",
-  "description": "云资产管理工具（多云 AK / 对象存储 / 控制台接管 / 告警 / RDS）",
+  "description": "Cloud Asset Hub — multi-cloud AK/SK, object storage, console takeover, batch alarm close & RDS",
   "main": "electron/main.js",
   "author": "yz0x1",
   "repository": {
@@ -25,7 +25,7 @@
   },
   "build": {
     "appId": "com.yz0x1.cloudassethub",
-    "productName": "云资产管理工具",
+    "productName": "CloudAssetHub",
     "copyright": "Copyright © 2026 yz0x1",
     "directories": {
       "output": "release",
@@ -65,8 +65,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "云资产管理工具",
-      "uninstallDisplayName": "云资产管理工具",
+      "shortcutName": "CloudAssetHub",
+      "uninstallDisplayName": "CloudAssetHub",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico"

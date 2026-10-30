@@ -10,6 +10,12 @@ contextBridge.exposeInMainWorld('akShell', {
 contextBridge.exposeInMainWorld('akAli', {
   request: (payload) => ipcRenderer.invoke('ali:request', payload)
 })
+contextBridge.exposeInMainWorld('akAi', {
+  listModels: (payload) => ipcRenderer.invoke('ai:listModels', payload),
+  chat: (payload) => ipcRenderer.invoke('ai:chat', payload),
+  probe: (payload) => ipcRenderer.invoke('ai:probe', payload),
+  abort: (requestId) => ipcRenderer.invoke('ai:abort', requestId)
+})
 contextBridge.exposeInMainWorld('akDialog', {
   openFile: () => ipcRenderer.invoke('dialog:openFile'),
   openFiles: () => ipcRenderer.invoke('dialog:openFiles'),
@@ -17,6 +23,8 @@ contextBridge.exposeInMainWorld('akDialog', {
   openDirectories: () => ipcRenderer.invoke('dialog:openDirectories'),
   saveFile: (name) => ipcRenderer.invoke('dialog:saveFile', name),
   writeTemp: (payload) => ipcRenderer.invoke('temp:write', payload),
+  writeText: (payload) => ipcRenderer.invoke('fs:writeText', payload),
+  readText: (filePath) => ipcRenderer.invoke('fs:readText', filePath),
   listFilesRecursive: (dirs) => ipcRenderer.invoke('fs:listFilesRecursive', dirs),
   ensureDir: (dir) => ipcRenderer.invoke('fs:ensureDir', dir),
   pathJoin: (...parts) => ipcRenderer.invoke('path:join', parts),

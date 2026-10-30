@@ -1,4 +1,4 @@
-const empty = () => ({ vpsList: [], storageAccounts: [], settings: {} })
+const empty = () => ({ vpsList: [], storageAccounts: [], aiAccounts: [], settings: {} })
 
 /** 去掉 Vue Proxy，避免 Electron IPC structuredClone 失败导致“保存成功但重启丢失” */
 function toPlain(data) {
@@ -11,7 +11,9 @@ function toPlain(data) {
 }
 
 function countAssets(d) {
-  return (d?.storageAccounts?.length || 0) + (d?.vpsList?.length || 0)
+  return (d?.storageAccounts?.length || 0)
+    + (d?.vpsList?.length || 0)
+    + (d?.aiAccounts?.length || 0)
 }
 
 function readLocal() {

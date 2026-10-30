@@ -104,7 +104,7 @@ function createWindow() {
     height: 900,
     minWidth: 1100,
     minHeight: 720,
-    title: '云资产管理工具',
+    title: 'Cloud Asset Hub',
     icon: icon || undefined,
     show: false,
     autoHideMenuBar: true,
@@ -141,7 +141,7 @@ function createTray() {
     )
   }
   tray = new Tray(icon)
-  tray.setToolTip('试试把文件拖到这里？ / 云资产管理工具')
+  tray.setToolTip('Drop files here · Cloud Asset Hub')
   const rebuildMenu = () => {
     const menu = Menu.buildFromTemplate([
       {
@@ -276,6 +276,19 @@ app.whenReady().then(() => {
   ipcMain.handle('cloud:ossListBuckets', wrap(cloud.ossListBuckets))
   ipcMain.handle('cloud:ossListObjects', wrap(cloud.ossListObjects))
   ipcMain.handle('cloud:httpRequest', wrap(cloud.httpRequest))
+  ipcMain.handle('ai:listModels', wrap(cloud.aiListModels))
+  ipcMain.handle('ai:chat', wrap(cloud.aiChatCompletions))
+  ipcMain.handle('ai:probe', wrap(cloud.aiProbe))
+  ipcMain.handle('ai:abort', (_e, requestId) => cloud.aiAbort(requestId))
+  ipcMain.handle('fs:writeText', (_e, { path: filePath, text }) => {
+    if (!filePath) throw new Error('缺少路径')
+    fs.writeFileSync(String(filePath), String(text ?? ''), 'utf8')
+    return true
+  })
+  ipcMain.handle('fs:readText', (_e, filePath) => {
+    if (!filePath) throw new Error('缺少路径')
+    return fs.readFileSync(String(filePath), 'utf8')
+  })
   ipcMain.handle('cloud:cosListObjects', wrap(cloud.cosListObjects))
   ipcMain.handle('cloud:cosListBuckets', wrap(cloud.cosListBuckets))
   ipcMain.handle('cloud:huaweiListUsers', wrap(cloud.huaweiListUsers))
@@ -382,12 +395,12 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('notify:show', (_e, { message, title }) => {
     try {
-      new Notification({ title: title || '云资产管理工具', body: message || '' }).show()
+      new Notification({ title: title || 'Cloud Asset Hub', body: message || '' }).show()
     } catch {}
     return true
   })
   ipcMain.handle('tray:updateTitle', (_e, title) => {
-    if (tray) tray.setToolTip(title ? String(title) : '云资产管理工具')
+    if (tray) tray.setToolTip(title ? String(title) : 'Cloud Asset Hub')
     return true
   })
 

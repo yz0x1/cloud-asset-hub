@@ -3,10 +3,10 @@
     <header class="top">
       <div class="top-left">
         <div class="logo-mark" aria-hidden="true">
-          <span>云</span>
+          <span>CA</span>
         </div>
         <div class="brand-block">
-          <div class="brand">云资产管理工具</div>
+          <div class="brand">Cloud Asset Hub</div>
           <span class="ver">v{{ version }}</span>
         </div>
         <span class="top-divider" aria-hidden="true"></span>
@@ -105,7 +105,7 @@
         </el-tab-pane>
         <el-tab-pane label="关于" name="about">
           <el-form label-width="120px">
-            <el-form-item label="产品名称">云资产管理工具</el-form-item>
+            <el-form-item label="产品名称">Cloud Asset Hub</el-form-item>
             <el-form-item label="版本">{{ version }}</el-form-item>
             <el-form-item label="数据文件">
               <div class="row-inline">
@@ -151,6 +151,7 @@ const route = useRoute()
 const tabs = [
   { name: 'storage', label: '云存储工具' },
   { name: 'server', label: '云服务工具' },
+  { name: 'ai', label: '云AI密钥' },
   { name: 'other', label: '其他工具' }
 ]
 const tab = ref('storage')
@@ -184,6 +185,7 @@ function mask(s) { return s ? s.slice(0, 4) + '****' + s.slice(-4) : '' }
 
 watch(() => route.path, (p) => {
   if (p.includes('storage')) tab.value = 'storage'
+  else if (p.includes('/ai')) tab.value = 'ai'
   else if (p.includes('other')) tab.value = 'other'
   else tab.value = 'server'
 }, { immediate: true })
@@ -407,8 +409,9 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: linear-gradient(145deg, #4aa3f5 0%, #1f6fd1 100%);
   color: #fff;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
+  letter-spacing: -0.3px;
   display: flex;
   align-items: center;
   justify-content: center;
