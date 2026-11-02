@@ -9,8 +9,15 @@ export const useVpsStore = defineStore('vps', {
   actions: {
     async init() {
       const data = await loadStore()
-      this.list = data.vpsList || []
+      const list = data.vpsList || []
+      let patched = false
+      this.list = list.map(r => {
+        if (r?.id) return r
+        patched = true
+        return { ...r, id: uid() }
+      })
       this.loaded = true
+      if (patched) await this.persist()
     },
     async persist() {
       const data = await loadStore()
@@ -34,7 +41,16 @@ export const useVpsStore = defineStore('vps', {
     async update(row) {
       const i = this.list.findIndex(x => x.id === row.id)
       if (i >= 0) {
-        const next = { ...this.list[i], ...row }
+        const prev = this.list[i]
+        const next = { ...prev, ...row }
+        // 改了 AK/SK 后旧主机缓存失效，避免展示错账号机器
+        const akChanged = row.access_key != null && row.access_key !== prev.access_key
+        const skChanged = row.secret_key != null && row.secret_key !== prev.secret_key
+        if (akChanged || skChanged) {
+          next.host_data = null
+          next.host_count = null
+          next.host_fetched_at = null
+        }
         this.list[i] = JSON.parse(JSON.stringify(next))
         await this.persist()
       }

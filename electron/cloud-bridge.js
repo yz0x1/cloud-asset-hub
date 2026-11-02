@@ -1459,11 +1459,21 @@ async function tencentDescribeInstances({ access_key, secret_key, region, Offset
   const res = await cvm.DescribeInstances({ Offset, Limit })
   return {
     TotalCount: res.TotalCount || 0,
+    // 保留列表/详细信息所需字段（此前裁太狠会导致公网 IP/配置/系统全空）
     InstanceSet: (res.InstanceSet || []).map(i => ({
       InstanceId: i.InstanceId,
       InstanceName: i.InstanceName,
       InstanceState: i.InstanceState,
-      Region: region
+      InstanceType: i.InstanceType,
+      CPU: i.CPU,
+      Memory: i.Memory,
+      OsName: i.OsName,
+      PublicIpAddresses: i.PublicIpAddresses || [],
+      PrivateIpAddresses: i.PrivateIpAddresses || [],
+      CreatedTime: i.CreatedTime,
+      ExpiredTime: i.ExpiredTime,
+      Region: region,
+      Placement: i.Placement || null
     }))
   }
 }

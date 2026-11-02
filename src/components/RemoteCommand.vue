@@ -66,6 +66,69 @@
     </el-form>
     <el-input v-if="output" v-model="output" type="textarea" :rows="10" style="margin-top:6px" readonly />
 
+    <!-- 对齐原版：按区域展示主机明细 + 详细信息 -->
+    <div v-if="regionGroups.length" class="inst-panel">
+      <div class="inst-panel-hd">
+        <h4>主机明细</h4>
+        <span class="sub">共 {{ instances.length }} 台 · 点击行可填入上方「实例 / 地域」</span>
+      </div>
+      <div v-for="g in regionGroups" :key="g.regionId" class="region-block">
+        <div class="table-regionId">
+          <div class="title">
+            区域名称: {{ g.localName }}
+            <el-button
+              v-if="isAli"
+              size="small"
+              type="primary"
+              link
+              @click="showHistoryForRegion(g.regionId)"
+            >历史命令信息查看</el-button>
+          </div>
+        </div>
+        <el-table
+          :data="g.list"
+          size="small"
+          border
+          stripe
+          highlight-current-row
+          style="width:100%"
+          @row-click="pickInstance"
+        >
+          <el-table-column prop="InstanceId" label="实例id" min-width="180" show-overflow-tooltip />
+          <el-table-column label="主机名称" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }">{{ hostName(row) }}</template>
+          </el-table-column>
+          <el-table-column label="公网ip" min-width="120">
+            <template #default="{ row }">
+              <div v-for="(ip, i) in publicIps(row)" :key="i">{{ ip }}</div>
+              <span v-if="!publicIps(row).length" class="muted">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="主机配置" min-width="110" align="center">
+            <template #default="{ row }">{{ hostSpec(row) }}</template>
+          </el-table-column>
+          <el-table-column label="系统版本" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }">{{ osName(row) }}</template>
+          </el-table-column>
+          <el-table-column label="运行状态" width="100" align="center">
+            <template #default="{ row }">{{ statusText(row) }}</template>
+          </el-table-column>
+          <el-table-column label="创建时间" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">{{ createTime(row) }}</template>
+          </el-table-column>
+          <el-table-column label="结束时间" min-width="150" show-overflow-tooltip>
+            <template #default="{ row }">{{ expireTime(row) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" align="center" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" link @click.stop="jsonView(row)">详细信息</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
+
+    <JsonViewer v-model="jsonVisible" title="详细信息" :data="jsonData" />
     <el-dialog v-model="histVisible" title="历史命令信息查看" width="720px">
       <el-alert type="info" :closable="false" style="margin-bottom:8px"
         title="注意此处命令记录不会保存本地，需要看去对应的服务器点击历史命令信息查看。" />
@@ -83,6 +146,7 @@ import { ref, reactive, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useVpsStore } from '@/stores/vps'
 import { CLOUD_VPS } from '@/constants/clouds'
+import JsonViewer from '@/components/JsonViewer.vue'
 import {
   createEcsClientAli, describeRegions, describeInstances,
   aliCreateCommand, aliInvokeCommand, aliDescribeInvocationResults, aliDeleteCommand,
@@ -105,6 +169,8 @@ const instances = ref([])
 const histVisible = ref(false)
 const histText = ref('')
 const cmdOutVisible = ref(false)
+const jsonVisible = ref(false)
+const jsonData = ref(null)
 const form = reactive({
   region: '',
   instanceId: '',
@@ -114,6 +180,80 @@ const form = reactive({
   isEcho: true
 })
 
+const regionNameMap = computed(() => {
+  const m = {}
+  for (const r of regions.value) m[r.RegionId] = r.LocalName || r.RegionId
+  return m
+})
+
+const regionGroups = computed(() => {
+  const map = new Map()
+  for (const inst of instances.value) {
+    const rid = inst._RegionId || form.region || 'unknown'
+    if (!map.has(rid)) {
+      map.set(rid, {
+        regionId: rid,
+        localName: regionNameMap.value[rid] || rid,
+        list: []
+      })
+    }
+    map.get(rid).list.push(inst)
+  }
+  return [...map.values()]
+})
+
+function hostName(row) {
+  return row.InstanceName || row.Name || row.hostName || '—'
+}
+function publicIps(row) {
+  if (isAli.value) {
+    const arr = row.PublicIpAddress?.IpAddress
+    const fromPub = Array.isArray(arr) ? arr.filter(Boolean) : []
+    if (fromPub.length) return fromPub
+    const eip = row.EipAddress?.IpAddress
+    return eip ? [eip] : []
+  }
+  if (isTencent.value) {
+    return Array.isArray(row.PublicIpAddresses) ? row.PublicIpAddresses.filter(Boolean) : []
+  }
+  if (row.PublicIpAddress) return [row.PublicIpAddress]
+  return []
+}
+function hostSpec(row) {
+  if (isAli.value) {
+    const cpu = row.Cpu ?? '—'
+    const mem = row.Memory ?? '—'
+    return `${cpu}核${mem}MB`
+  }
+  if (isTencent.value) {
+    const cpu = row.CPU ?? row.Cpu ?? '—'
+    const mem = row.Memory ?? '—'
+    return `${cpu}核${mem}G`
+  }
+  return '—'
+}
+function osName(row) {
+  return row.OSName || row.OsName || '—'
+}
+function statusText(row) {
+  return row.Status || row.InstanceState || row.State || '—'
+}
+function createTime(row) {
+  return row.StartTime || row.CreatedTime || row.CreateTime || row.LaunchTime || '—'
+}
+function expireTime(row) {
+  return row.ExpiredTime || row.ExpireTime || '—'
+}
+
+function pickInstance(row) {
+  form.instanceId = row.InstanceId
+  if (row._RegionId) form.region = row._RegionId
+}
+function jsonView(row) {
+  jsonData.value = row
+  jsonVisible.value = true
+}
+
 function onVps(id) {
   current.value = store.list.find(x => x.id === id)
   instances.value = []
@@ -122,6 +262,21 @@ function onVps(id) {
   if (current.value?.name === CLOUD_VPS.tencent.name) form.region = form.region || 'ap-guangzhou'
   if (current.value?.name === CLOUD_VPS.alibaba.name) form.region = form.region || 'cn-hangzhou'
 }
+
+/** 资产列表展开区点选实例 → 填入本命令区 */
+function selectTarget(vpsRow, instance) {
+  if (!vpsRow || !instance) return
+  vpsId.value = vpsRow.id
+  current.value = vpsRow
+  const rid = instance._RegionId || form.region
+  if (rid) form.region = rid
+  form.instanceId = instance.InstanceId
+  if (!instances.value.some(i => i.InstanceId === instance.InstanceId)) {
+    instances.value = [...instances.value, instance]
+  }
+}
+
+defineExpose({ selectTarget })
 
 async function loadRegions() {
   if (!current.value) return
@@ -247,17 +402,23 @@ async function runAliNoEcho() {
   return '命令：' + form.cmd + ' 区域名称：' + form.region + '\r\n' + JSON.stringify(res, null, 2)
 }
 
-async function showHistory() {
-  if (!current.value || !form.region) return ElMessage.error('请填写完整')
+async function showHistoryForRegion(regionId) {
+  const rid = regionId || form.region
+  if (!current.value || !rid) return ElMessage.error('请填写完整')
+  if (!isAli.value) return ElMessage.warning('历史命令信息查看目前仅支持阿里云')
   loading.value = true
   try {
     const c = createEcsClientAli(current.value.access_key, current.value.secret_key)
-    const cmds = await aliDescribeCommands(c, { RegionId: form.region, PageSize: 50, PageNumber: 1 })
-    const inv = await aliDescribeInvocations(c, { RegionId: form.region, PageSize: 50, PageNumber: 1 })
-    histText.value = JSON.stringify({ commands: cmds, invocations: inv }, null, 2)
+    const cmds = await aliDescribeCommands(c, { RegionId: rid, PageSize: 50, PageNumber: 1 })
+    const inv = await aliDescribeInvocations(c, { RegionId: rid, PageSize: 50, PageNumber: 1 })
+    histText.value = JSON.stringify({ region: rid, commands: cmds, invocations: inv }, null, 2)
     histVisible.value = true
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
+}
+
+async function showHistory() {
+  return showHistoryForRegion(form.region)
 }
 
 async function run() {
@@ -293,6 +454,7 @@ async function run() {
 .cmd-panel { margin-top: 0; }
 .cmd-form { max-width: 920px; }
 .hint { margin-left: 10px; font-size: 12px; color: var(--muted); }
+.muted { color: var(--muted); }
 .json {
   background: #0f1724;
   color: #d7e2f2;
@@ -305,4 +467,36 @@ async function run() {
   font-size: 12px;
   line-height: 1.5;
 }
+.inst-panel {
+  margin-top: 18px;
+  border-top: 1px solid var(--border, #1e2a3d);
+  padding-top: 14px;
+}
+.inst-panel-hd {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.inst-panel-hd h4 {
+  margin: 0;
+  font-size: 15px;
+}
+.inst-panel-hd .sub {
+  font-size: 12px;
+  color: var(--muted);
+}
+.region-block { margin-bottom: 16px; }
+.table-regionId {
+  margin-bottom: 6px;
+}
+.table-regionId .title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #e8eef8);
+}
+:deep(.el-table) { cursor: pointer; }
 </style>

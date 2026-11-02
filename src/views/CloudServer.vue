@@ -36,6 +36,7 @@
               style="width: 220px"
             />
             <el-button @click="showAk = !showAk">{{ showAk ? '隐藏' : '显示' }}密钥</el-button>
+            <el-button type="primary" plain @click="exportVpsAssets">导出资产</el-button>
             <el-button @click="init">刷新</el-button>
             <el-button type="primary" @click="switchTab(CLOUD_VPS.alibaba.key)">添加 AKSK</el-button>
           </div>
@@ -44,18 +45,35 @@
         <el-table
           v-if="filtered.length"
           :data="filtered"
+          row-key="id"
           stripe
           border
           height="calc(100vh - 380px)"
           min-height="280"
+          @expand-change="onExpandChange"
         >
+          <el-table-column type="expand" width="46">
+            <template #default="{ row }">
+              <AssetHostExpand
+                :row="row"
+                :active="expandedIds.has(row.id)"
+                @pick="(inst) => onPickHost(row, inst)"
+              />
+            </template>
+          </el-table-column>
           <el-table-column type="index" label="No" width="58" />
-          <el-table-column prop="as_name" label="备注" min-width="120" show-overflow-tooltip>
+          <el-table-column prop="as_name" label="别名" min-width="120" show-overflow-tooltip>
             <template #default="{ row }">
               <span class="as-name">{{ row.as_name || '—' }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="云厂商" width="120">
+          <el-table-column label="资产数量" width="96" align="center">
+            <template #default="{ row }">
+              <span v-if="row.host_count != null" class="host-count">{{ row.host_count }}</span>
+              <span v-else class="muted-dash">—</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="归属" width="120">
             <template #default="{ row }">
               <span class="cloud-chip" :class="chipClass(row)">
                 <i class="prov-dot" :data-k="row.key || keyOf(row.name)"></i>
@@ -73,11 +91,12 @@
               <code class="mono-cell">{{ showAk ? row.secret_key : '********' }}</code>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="220" fixed="right">
+          <el-table-column label="操作" width="280" fixed="right">
             <template #default="{ row }">
               <div class="ops">
                 <el-button link type="primary" @click="doConsole(row)">接管</el-button>
                 <el-button link @click="openEdit(row)">编辑</el-button>
+                <el-button link style="color:#06A845" @click="openNote(row)">笔记</el-button>
 
                 <el-dropdown trigger="click" @command="(cmd) => onMore(cmd, row)">
                   <el-button link type="primary">
@@ -108,6 +127,10 @@
                         v-if="row.name === CLOUD_VPS.aws.name"
                         command="awsBackdoor"
                       >创建后门</el-dropdown-item>
+                      <el-dropdown-item
+                        v-if="row.name === CLOUD_VPS.aws.name"
+                        command="awsBackdoorView"
+                      >查看后门信息</el-dropdown-item>
                       <el-dropdown-item
                         v-if="row.name === CLOUD_VPS.ucloud.name"
                         command="ucloudOrders"
@@ -171,7 +194,7 @@
       </div>
     </div>
 
-    <RemoteCommand />
+    <RemoteCommand ref="cmdRef" />
 
     <AlarmManager v-model="alarmVisible" :row="alarmRow" />
     <RdsManager v-model="rdsVisible" :row="rdsRow" />
@@ -197,6 +220,21 @@
         <el-button type="primary" @click="awsPermVisible=false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="noteVisible" title="笔记" width="480px" :close-on-click-modal="false">
+      <el-form label-width="72px">
+        <el-form-item label="别名">
+          <el-input v-model="noteForm.as_name" placeholder="请输入你要修改的别名" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="noteForm.remark" type="textarea" :rows="4" maxlength="200" show-word-limit placeholder="笔记内容" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="noteVisible=false">取消</el-button>
+        <el-button type="primary" @click="saveNote">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -210,6 +248,7 @@ import AlarmManager from '@/components/AlarmManager.vue'
 import RdsManager from '@/components/RdsManager.vue'
 import ConsolePanel from '@/components/ConsolePanel.vue'
 import RemoteCommand from '@/components/RemoteCommand.vue'
+import AssetHostExpand from '@/components/AssetHostExpand.vue'
 import JsonViewer from '@/components/JsonViewer.vue'
 import { tencentUsers, tencentDomains, huaweiUsers, ucloudOrders, awsPolicies, awsCreateKey } from '@/services/cloud'
 import { createRamClientAli, aliListUsers } from '@/services/aliyun/ram'
@@ -239,6 +278,60 @@ const awsBusy = ref(false)
 const awsRow = ref(null)
 const awsUsers = ref([])
 const awsUserName = ref('')
+const cmdRef = ref(null)
+const expandedIds = ref(new Set())
+const noteVisible = ref(false)
+const noteRow = ref(null)
+const noteForm = reactive({ as_name: '', remark: '' })
+
+function onExpandChange(row, expandedRows) {
+  const ids = new Set(expandedRows.map(r => r.id))
+  expandedIds.value = ids
+}
+function onPickHost(vpsRow, inst) {
+  cmdRef.value?.selectTarget?.(vpsRow, inst)
+  ElMessage.success(`已选入命令区：${inst.InstanceId}`)
+}
+function openNote(row) {
+  noteRow.value = row
+  noteForm.as_name = row.as_name || ''
+  noteForm.remark = row.remark || ''
+  noteVisible.value = true
+}
+async function saveNote() {
+  if (!noteRow.value) return
+  await store.update({
+    id: noteRow.value.id,
+    as_name: noteForm.as_name,
+    remark: noteForm.remark
+  })
+  noteVisible.value = false
+  ElMessage.success('保存成功')
+}
+function exportVpsAssets() {
+  const list = store.list || []
+  if (!list.length) return ElMessage.error('暂无资产')
+  const payload = list.map(e => ({
+    name: e.name,
+    key: e.key,
+    as_name: e.as_name,
+    access_key: e.access_key,
+    secret_key: e.secret_key,
+    remark: e.remark || '',
+    host_count: e.host_count ?? null,
+    created_at: e.created_at || null
+  }))
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  const stamp = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  const name = `云服务资产列表-${stamp.getFullYear()}${p(stamp.getMonth() + 1)}${p(stamp.getDate())}${p(stamp.getHours())}${p(stamp.getMinutes())}${p(stamp.getSeconds())}.json`
+  a.href = URL.createObjectURL(blob)
+  a.download = name
+  a.click()
+  URL.revokeObjectURL(a.href)
+  ElMessage.success('导出成功')
+}
 
 const activeCloud = computed(() => clouds.find(c => c.key === subTab.value) || ALI)
 const filtered = computed(() => {
@@ -348,8 +441,17 @@ function onMore(cmd, row) {
   if (cmd === 'domains') return viewDomains(row)
   if (cmd === 'awsPolicies') return viewAwsPolicies(row)
   if (cmd === 'awsBackdoor') return openAwsBackdoor(row)
+  if (cmd === 'awsBackdoorView') return viewAwsBackdoor(row)
   if (cmd === 'ucloudOrders') return viewUcloudOrders(row)
   if (cmd === 'remove') return remove(row)
+}
+
+function viewAwsBackdoor(row) {
+  const data = row['注入用户'] || row.aws_backdoor
+  if (!data) return ElMessage.error('暂无后门信息！')
+  jsonTitle.value = '查看后门信息'
+  jsonData.value = data
+  jsonVisible.value = true
 }
 
 async function viewUsers(row) {
@@ -423,6 +525,8 @@ async function doCreateAwsAk() {
   awsBusy.value = true
   try {
     const data = await awsCreateKey(awsRow.value, awsUserName.value.trim())
+    // 对齐原版：写入行内「注入用户」，供「查看后门信息」
+    await store.update({ id: awsRow.value.id, 注入用户: JSON.parse(JSON.stringify(data)) })
     jsonTitle.value = 'AWS 新建 AccessKey（请立即保存 Secret）'
     jsonData.value = data
     jsonVisible.value = true
@@ -505,6 +609,8 @@ async function viewUcloudOrders(row) {
 }
 .toolbar-right { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .as-name { font-weight: 550; color: var(--title); }
+.host-count { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--accent-active, #2d8cf0); }
+.muted-dash { color: var(--muted); }
 .mono-cell {
   font-family: var(--mono);
   font-size: 12px;

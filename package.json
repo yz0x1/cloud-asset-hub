@@ -1,7 +1,7 @@
 {
   "name": "cloud-asset-hub",
   "cnname": "Cloud Asset Hub",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "cdnPath": "",
   "description": "Cloud Asset Hub — multi-cloud AK/SK, object storage, console takeover, batch alarm close & RDS",
   "main": "electron/main.js",
