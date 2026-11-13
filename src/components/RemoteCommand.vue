@@ -5,7 +5,7 @@
         <h3>命令执行区</h3>
         <p class="sub">对齐原版云助手 / TAT</p>
       </div>
-      <el-tag size="small" effect="plain" type="primary">阿里云 ECS · 腾讯云 TAT</el-tag>
+      <el-tag size="small" effect="plain" type="primary">阿里云 ECS · 腾讯云 TAT · 火山云助手</el-tag>
     </div>
     <div class="ak-panel-bd">
     <el-form label-width="110px" class="cmd-form">
@@ -152,13 +152,19 @@ import {
   aliCreateCommand, aliInvokeCommand, aliDescribeInvocationResults, aliDeleteCommand,
   aliDescribeCommands, aliDescribeInvocations, runCommand
 } from '@/services/aliyun/ecs'
-import { runRemoteCommand, tencentCvmRegions, tencentCvmInstances } from '@/services/cloud'
+import {
+  runRemoteCommand, tencentCvmRegions, tencentCvmInstances,
+  volcEcsRegions, volcEcsAllInstances, volcRunCommand, volcDescribeInvocations
+} from '@/services/cloud'
 
 const store = useVpsStore()
 const runnable = computed(() => store.list.filter(v =>
-  v.name === CLOUD_VPS.alibaba.name || v.name === CLOUD_VPS.tencent.name))
+  v.name === CLOUD_VPS.alibaba.name
+  || v.name === CLOUD_VPS.tencent.name
+  || v.name === CLOUD_VPS.volcengine.name))
 const isAli = computed(() => current.value?.name === CLOUD_VPS.alibaba.name)
 const isTencent = computed(() => current.value?.name === CLOUD_VPS.tencent.name)
+const isVolc = computed(() => current.value?.name === CLOUD_VPS.volcengine.name)
 const vpsId = ref('')
 const current = ref(null)
 const loading = ref(false)
@@ -213,8 +219,11 @@ function publicIps(row) {
     const eip = row.EipAddress?.IpAddress
     return eip ? [eip] : []
   }
-  if (isTencent.value) {
-    return Array.isArray(row.PublicIpAddresses) ? row.PublicIpAddresses.filter(Boolean) : []
+  if (isTencent.value || isVolc.value) {
+    const arr = Array.isArray(row.PublicIpAddresses) ? row.PublicIpAddresses.filter(Boolean) : []
+    if (arr.length) return arr
+    const eip = row.EipAddress?.IpAddress
+    return eip ? [eip] : []
   }
   if (row.PublicIpAddress) return [row.PublicIpAddress]
   return []
@@ -229,6 +238,11 @@ function hostSpec(row) {
     const cpu = row.CPU ?? row.Cpu ?? '—'
     const mem = row.Memory ?? '—'
     return `${cpu}核${mem}G`
+  }
+  if (isVolc.value) {
+    const cpu = row.Cpus ?? row.Cpu ?? '—'
+    const mem = row.MemorySize ?? row.Memory
+    return mem != null ? `${cpu}核${mem}MB` : `${cpu}核`
   }
   return '—'
 }
@@ -261,11 +275,21 @@ function onVps(id) {
   selRegions.value = []
   if (current.value?.name === CLOUD_VPS.tencent.name) form.region = form.region || 'ap-guangzhou'
   if (current.value?.name === CLOUD_VPS.alibaba.name) form.region = form.region || 'cn-hangzhou'
+  if (current.value?.name === CLOUD_VPS.volcengine.name) form.region = form.region || 'cn-beijing'
 }
 
 /** 资产列表展开区点选实例 → 填入本命令区 */
 function selectTarget(vpsRow, instance) {
   if (!vpsRow || !instance) return
+  // 京东云 / 百度云尚未接云助手，点选主机只填展示，避免误走腾讯 TAT
+  const ok = runnable.value.some(v => v.id === vpsRow.id)
+    || vpsRow.name === CLOUD_VPS.alibaba.name
+    || vpsRow.name === CLOUD_VPS.tencent.name
+    || vpsRow.name === CLOUD_VPS.volcengine.name
+  if (!ok) {
+    ElMessage.warning(`${vpsRow.name} 暂不支持远程命令（仅主机明细可用）`)
+    return
+  }
   vpsId.value = vpsRow.id
   current.value = vpsRow
   const rid = instance._RegionId || form.region
@@ -291,6 +315,12 @@ async function loadRegions() {
       regions.value = (res.RegionSet || []).map(r => ({
         RegionId: r.Region,
         LocalName: r.RegionName || r.Region
+      }))
+    } else if (isVolc.value) {
+      const res = await volcEcsRegions(current.value)
+      regions.value = (res.RegionSet || res.Regions || []).map(r => ({
+        RegionId: r.RegionId || r.Region,
+        LocalName: r.LocalName || r.RegionName || r.RegionId || r.Region
       }))
     } else {
       return
@@ -321,6 +351,18 @@ async function loadInstances() {
       for (const rid of regs) {
         try {
           const res = await tencentCvmInstances(current.value, { region: rid, Limit: 100 })
+          const list = res.InstanceSet || []
+          list.forEach(i => {
+            i._RegionId = rid
+            if (!i.InstanceName) i.InstanceName = i.InstanceId
+          })
+          all.push(...list)
+        } catch {}
+      }
+    } else if (isVolc.value) {
+      for (const rid of regs) {
+        try {
+          const res = await volcEcsAllInstances(current.value, { region: rid })
           const list = res.InstanceSet || []
           list.forEach(i => {
             i._RegionId = rid
@@ -405,13 +447,22 @@ async function runAliNoEcho() {
 async function showHistoryForRegion(regionId) {
   const rid = regionId || form.region
   if (!current.value || !rid) return ElMessage.error('请填写完整')
-  if (!isAli.value) return ElMessage.warning('历史命令信息查看目前仅支持阿里云')
+  if (!isAli.value && !isVolc.value) {
+    return ElMessage.warning('历史命令信息查看目前支持阿里云 / 火山引擎')
+  }
   loading.value = true
   try {
-    const c = createEcsClientAli(current.value.access_key, current.value.secret_key)
-    const cmds = await aliDescribeCommands(c, { RegionId: rid, PageSize: 50, PageNumber: 1 })
-    const inv = await aliDescribeInvocations(c, { RegionId: rid, PageSize: 50, PageNumber: 1 })
-    histText.value = JSON.stringify({ region: rid, commands: cmds, invocations: inv }, null, 2)
+    if (isVolc.value) {
+      const inv = await volcDescribeInvocations(current.value, {
+        region: rid, PageNumber: 1, PageSize: 50
+      })
+      histText.value = JSON.stringify({ region: rid, invocations: inv }, null, 2)
+    } else {
+      const c = createEcsClientAli(current.value.access_key, current.value.secret_key)
+      const cmds = await aliDescribeCommands(c, { RegionId: rid, PageSize: 50, PageNumber: 1 })
+      const inv = await aliDescribeInvocations(c, { RegionId: rid, PageSize: 50, PageNumber: 1 })
+      histText.value = JSON.stringify({ region: rid, commands: cmds, invocations: inv }, null, 2)
+    }
     histVisible.value = true
   } catch (e) { ElMessage.error(e.message) }
   finally { loading.value = false }
@@ -425,11 +476,35 @@ async function run() {
   if (!current.value || !form.instanceId || !form.cmd || !form.region) {
     return ElMessage.error('请填写完整')
   }
+  if (
+    current.value.name !== CLOUD_VPS.alibaba.name
+    && current.value.name !== CLOUD_VPS.tencent.name
+    && current.value.name !== CLOUD_VPS.volcengine.name
+  ) {
+    return ElMessage.warning(`${current.value.name} 暂不支持远程命令`)
+  }
   loading.value = true
   output.value = ''
   try {
     if (current.value.name === CLOUD_VPS.alibaba.name) {
       output.value = form.isEcho ? await runAliEcho() : await runAliNoEcho()
+      ElMessage.success('执行命令成功')
+    } else if (current.value.name === CLOUD_VPS.volcengine.name) {
+      const typeMap = {
+        RunShellScript: 'Shell',
+        RunBatScript: 'Bat',
+        RunPowerShellScript: 'PowerShell'
+      }
+      const r = await volcRunCommand(current.value, {
+        region: form.region,
+        instanceId: form.instanceId,
+        command: form.cmd,
+        type: typeMap[form.system_key] || 'Shell',
+        timeout: Math.max(30, (form.time || 3) * 20)
+      })
+      output.value = '命令：' + form.cmd + ' 区域名称：' + form.region
+        + '\r\n状态：' + (r.status || '')
+        + '\r\n' + (r.output || r.errorMessage || JSON.stringify(r, null, 2))
       ElMessage.success('执行命令成功')
     } else {
       const r = await runRemoteCommand({

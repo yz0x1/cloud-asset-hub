@@ -175,6 +175,9 @@ const chipClass = computed(() => {
   if (n === '华为云') return 'hw'
   if (n === 'ucloud') return 'uc'
   if (n === 'AWS') return 'aws'
+  if (n === '火山引擎') return 'volc'
+  if (n === '京东云') return 'jd'
+  if (n === '百度云') return 'baidu'
   return ''
 })
 const hint = computed(() => {
@@ -184,6 +187,15 @@ const hint = computed(() => {
   if (n === CLOUD_VPS.huawei.name) return '华为云：CreateUser → 加入 admin 用户组'
   if (n === CLOUD_VPS.aws.name) return 'AWS：STS GetFederationToken + 联邦登录 URL'
   if (n === CLOUD_VPS.ucloud.name) return 'UCloud：CreateUser → AttachPoliciesToUser(AdministratorAccess)'
+  if (n === CLOUD_VPS.volcengine.name) {
+    return '火山引擎：CreateUser → CreateLoginProfile → AttachUserPolicy(AdministratorAccess)；登录页需主账号 ID + 子用户名 + 密码'
+  }
+  if (n === CLOUD_VPS.jdcloud.name) {
+    return '京东云：createSubUser → attachSubUserPolicy(JDCloudAdmin-New)；登录页需主账号 PIN + 子用户名 + 密码'
+  }
+  if (n === CLOUD_VPS.baidu.name) {
+    return '百度云：CreateUser → CreateLoginProfile(needResetPassword) → AttachPolicy(SystemAdminPolicy)；登录 https://login.bce.baidu.com/'
+  }
   return ''
 })
 

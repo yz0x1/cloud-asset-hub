@@ -37,6 +37,15 @@ export async function takeover(row, form = {}) {
       ...base, userName: f.userName, email: f.email, projectID: f.projectID
     }))
   }
+  if (name === CLOUD_VPS.volcengine.name) {
+    return unwrap(window.akCloud.volcConsole({ ...base, userName: f.userName }))
+  }
+  if (name === CLOUD_VPS.jdcloud.name) {
+    return unwrap(window.akCloud.jdConsole({ ...base, userName: f.userName }))
+  }
+  if (name === CLOUD_VPS.baidu.name) {
+    return unwrap(window.akCloud.baiduConsole({ ...base, userName: f.userName }))
+  }
   throw new Error('未知云厂商')
 }
 
@@ -51,6 +60,9 @@ export async function cancelTakeover(row) {
   if (name === CLOUD_VPS.tencent.name) return unwrap(window.akCloud.tencentCancel(base))
   if (name === CLOUD_VPS.huawei.name) return unwrap(window.akCloud.huaweiCancel(base))
   if (name === CLOUD_VPS.ucloud.name) return unwrap(window.akCloud.ucloudCancel(base))
+  if (name === CLOUD_VPS.volcengine.name) return unwrap(window.akCloud.volcCancel(base))
+  if (name === CLOUD_VPS.jdcloud.name) return unwrap(window.akCloud.jdCancel(base))
+  if (name === CLOUD_VPS.baidu.name) return unwrap(window.akCloud.baiduCancel(base))
   if (name === CLOUD_VPS.alibaba.name) throw new Error('ALIBABA_LOCAL')
   if (name === CLOUD_VPS.aws.name) throw new Error('AWS 联邦令牌无需取消用户，清空本地记录即可')
   throw new Error('未知云厂商')
@@ -173,7 +185,7 @@ export async function storagePut(provider, row, opts) {
   if (provider === 'qiniu') return unwrap(window.akCloud.qiniuPutObject({ ...c, ...opts }))
   if (provider === 'qingstor') return unwrap(window.akCloud.qingstorPutObject({ ...c, ...opts }))
   if (provider === 'upyun') return unwrap(window.akCloud.upyunPutObject(opts))
-  if (['aws', 'minio', 'ks3', 'jd'].includes(provider)) {
+  if (['aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(provider)) {
     return unwrap(window.akCloud.s3PutObject({ ...c, ...opts }))
   }
   throw new Error('该提供商暂不支持上传')
@@ -187,7 +199,7 @@ export async function storageGet(provider, row, opts) {
   if (provider === 'qiniu') return unwrap(window.akCloud.qiniuGetObject({ ...c, ...opts }))
   if (provider === 'qingstor') return unwrap(window.akCloud.qingstorGetObject({ ...c, ...opts }))
   if (provider === 'upyun') return unwrap(window.akCloud.upyunGetObject(opts))
-  if (['aws', 'minio', 'ks3', 'jd'].includes(provider)) {
+  if (['aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(provider)) {
     return unwrap(window.akCloud.s3GetObject({ ...c, ...opts }))
   }
   throw new Error('该提供商暂不支持下载')
@@ -199,7 +211,7 @@ export async function storageSign(provider, row, opts) {
   if (provider === 'aliyun') return unwrap(window.akCloud.ossSignUrl({ ...c, ...opts }))
   if (provider === 'tencent') return unwrap(window.akCloud.cosSignUrl({ ...c, ...opts }))
   if (provider === 'qiniu') return unwrap(window.akCloud.qiniuSignUrl({ ...c, ...opts }))
-  if (['aws', 'minio', 'ks3', 'jd'].includes(provider)) {
+  if (['aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(provider)) {
     return unwrap(window.akCloud.s3SignUrl({ ...c, ...opts }))
   }
   throw new Error('该提供商暂不支持预签名')
@@ -213,7 +225,7 @@ export async function storageDelete(provider, row, opts) {
   if (provider === 'qiniu') return unwrap(window.akCloud.qiniuDeleteObject({ ...c, ...opts }))
   if (provider === 'qingstor') return unwrap(window.akCloud.qingstorDeleteObject({ ...c, ...opts }))
   if (provider === 'upyun') return unwrap(window.akCloud.upyunDeleteObject(opts))
-  if (['aws', 'minio', 'ks3', 'jd'].includes(provider)) {
+  if (['aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(provider)) {
     return unwrap(window.akCloud.s3DeleteObject({ ...c, ...opts }))
   }
   throw new Error('该提供商暂不支持删除')
@@ -233,7 +245,7 @@ export async function storageMkdir(provider, row, opts) {
   if (provider === 'tencent') return unwrap(window.akCloud.cosMkdir({ ...c, ...opts }))
   if (provider === 'qingstor') return unwrap(window.akCloud.qingstorMkdir({ ...c, ...opts }))
   if (provider === 'upyun') return unwrap(window.akCloud.upyunMkdir(opts))
-  if (['aws', 'minio', 'ks3', 'jd'].includes(provider)) {
+  if (['aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(provider)) {
     return unwrap(window.akCloud.s3Mkdir({ ...c, ...opts }))
   }
   throw new Error('该提供商暂不支持建目录')
@@ -247,7 +259,7 @@ export async function storageMove(provider, row, opts) {
   if (provider === 'qiniu') return unwrap(window.akCloud.qiniuMoveObject({ ...c, ...opts }))
   if (provider === 'qingstor') return unwrap(window.akCloud.qingstorMoveObject({ ...c, ...opts }))
   if (provider === 'upyun') return unwrap(window.akCloud.upyunMoveObject(opts))
-  if (['aws', 'minio', 'ks3', 'jd'].includes(provider)) {
+  if (['aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(provider)) {
     return unwrap(window.akCloud.s3MoveObject({ ...c, ...opts }))
   }
   throw new Error('该提供商暂不支持移动')
@@ -287,5 +299,125 @@ export async function awsCreateKey(row, UserName) {
   return unwrap(window.akCloud.awsCreateAccessKey({
     access_key: row.access_key, secret_key: row.secret_key,
     region: 'us-east-1', UserName
+  }))
+}
+
+export async function volcUsers(row, opts = {}) {
+  need()
+  return unwrap(window.akCloud.volcListUsers({
+    access_key: row.access_key, secret_key: row.secret_key,
+    Offset: opts.Offset || 0, Limit: opts.Limit || 100
+  }))
+}
+
+export async function volcPolicies(row, opts = {}) {
+  need()
+  return unwrap(window.akCloud.volcListPolicies({
+    access_key: row.access_key, secret_key: row.secret_key,
+    Scope: opts.Scope || 'All', Limit: opts.Limit || 100, Offset: opts.Offset || 0
+  }))
+}
+
+export async function volcCreateKey(row, UserName) {
+  need()
+  return unwrap(window.akCloud.volcCreateAccessKey({
+    access_key: row.access_key, secret_key: row.secret_key, UserName
+  }))
+}
+
+export async function volcEcsRegions(row) {
+  need()
+  return unwrap(window.akCloud.volcDescribeRegions({
+    access_key: row.access_key, secret_key: row.secret_key
+  }))
+}
+
+export async function volcEcsInstances(row, { region, MaxResults = 100, NextToken = '' } = {}) {
+  need()
+  return unwrap(window.akCloud.volcDescribeInstances({
+    access_key: row.access_key, secret_key: row.secret_key, region, MaxResults, NextToken
+  }))
+}
+
+export async function volcEcsAllInstances(row, { region } = {}) {
+  need()
+  return unwrap(window.akCloud.volcDescribeAllInstances({
+    access_key: row.access_key, secret_key: row.secret_key, region
+  }))
+}
+
+export async function volcRunCommand(row, opts = {}) {
+  need()
+  return unwrap(window.akCloud.volcRunCommand({
+    access_key: row.access_key, secret_key: row.secret_key, ...opts
+  }))
+}
+
+export async function volcDescribeInvocations(row, opts = {}) {
+  need()
+  return unwrap(window.akCloud.volcDescribeInvocations({
+    access_key: row.access_key, secret_key: row.secret_key, ...opts
+  }))
+}
+
+export async function jdUsers(row, opts = {}) {
+  need()
+  return unwrap(window.akCloud.jdListUsers({
+    access_key: row.access_key, secret_key: row.secret_key, ...opts
+  }))
+}
+export async function jdPolicies(row, opts = {}) {
+  need()
+  return unwrap(window.akCloud.jdListPolicies({
+    access_key: row.access_key, secret_key: row.secret_key, ...opts
+  }))
+}
+export async function jdCreateKey(row, subUser) {
+  need()
+  return unwrap(window.akCloud.jdCreateAccessKey({
+    access_key: row.access_key, secret_key: row.secret_key, subUser
+  }))
+}
+export async function jdEcsRegions(row) {
+  need()
+  return unwrap(window.akCloud.jdDescribeRegions({
+    access_key: row.access_key, secret_key: row.secret_key
+  }))
+}
+export async function jdEcsAllInstances(row, { region } = {}) {
+  need()
+  return unwrap(window.akCloud.jdDescribeAllInstances({
+    access_key: row.access_key, secret_key: row.secret_key, region
+  }))
+}
+
+export async function baiduUsers(row) {
+  need()
+  return unwrap(window.akCloud.baiduListUsers({
+    access_key: row.access_key, secret_key: row.secret_key
+  }))
+}
+export async function baiduPolicies(row, opts = {}) {
+  need()
+  return unwrap(window.akCloud.baiduListPolicies({
+    access_key: row.access_key, secret_key: row.secret_key, ...opts
+  }))
+}
+export async function baiduCreateKey(row, userName) {
+  need()
+  return unwrap(window.akCloud.baiduCreateAccessKey({
+    access_key: row.access_key, secret_key: row.secret_key, userName
+  }))
+}
+export async function baiduEcsRegions(row) {
+  need()
+  return unwrap(window.akCloud.baiduDescribeRegions({
+    access_key: row.access_key, secret_key: row.secret_key
+  }))
+}
+export async function baiduEcsAllInstances(row, { region } = {}) {
+  need()
+  return unwrap(window.akCloud.baiduDescribeAllInstances({
+    access_key: row.access_key, secret_key: row.secret_key, region
   }))
 }

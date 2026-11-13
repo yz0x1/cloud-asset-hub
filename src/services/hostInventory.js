@@ -2,7 +2,12 @@ import { CLOUD_VPS } from '@/constants/clouds'
 import {
   createEcsClientAli, describeRegions, describeInstances
 } from '@/services/aliyun/ecs'
-import { tencentCvmRegions, tencentCvmInstances } from '@/services/cloud'
+import {
+  tencentCvmRegions, tencentCvmInstances,
+  volcEcsRegions, volcEcsAllInstances,
+  jdEcsRegions, jdEcsAllInstances,
+  baiduEcsRegions, baiduEcsAllInstances
+} from '@/services/cloud'
 
 /** 进行中的拉取：同一资产不并发打两遍 */
 const inflight = new Map()
@@ -62,8 +67,64 @@ function slimTencentInstance(i, rid) {
   }
 }
 
+function slimVolcInstance(i, rid) {
+  return {
+    InstanceId: i.InstanceId,
+    InstanceName: i.InstanceName || i.InstanceId,
+    Status: i.Status,
+    InstanceState: i.Status || i.InstanceState,
+    Cpus: i.Cpus ?? i.Cpu,
+    Cpu: i.Cpus ?? i.Cpu,
+    MemorySize: i.MemorySize ?? i.Memory,
+    Memory: i.MemorySize ?? i.Memory,
+    OsName: i.OsName || i.OSName,
+    OSName: i.OsName || i.OSName,
+    OsType: i.OsType,
+    CreatedTime: i.CreatedTime,
+    ExpiredTime: i.ExpiredTime,
+    PublicIpAddresses: i.PublicIpAddresses || [],
+    PrivateIpAddresses: i.PrivateIpAddresses || [],
+    EipAddress: i.EipAddress || null,
+    InstanceType: i.InstanceType,
+    ZoneId: i.ZoneId,
+    Region: i.Region || rid,
+    RegionId: rid,
+    _RegionId: rid,
+    ProjectName: i.ProjectName
+  }
+}
+
+function slimJdOrBaiduInstance(i, rid) {
+  return {
+    InstanceId: i.InstanceId,
+    InstanceName: i.InstanceName || i.InstanceId,
+    Status: i.Status,
+    InstanceState: i.Status || i.InstanceState,
+    Cpu: i.Cpu ?? i.Cpus,
+    Cpus: i.Cpus ?? i.Cpu,
+    Memory: i.Memory ?? i.MemorySize,
+    MemorySize: i.MemorySize ?? i.Memory,
+    OsName: i.OsName || i.OSName,
+    OSName: i.OsName || i.OSName,
+    CreatedTime: i.CreatedTime || i.CreateTime,
+    ExpiredTime: i.ExpiredTime,
+    PublicIpAddresses: i.PublicIpAddresses || [],
+    PrivateIpAddresses: i.PrivateIpAddresses || [],
+    EipAddress: i.EipAddress || null,
+    InstanceType: i.InstanceType,
+    ZoneId: i.ZoneId || i.Az,
+    Region: i.Region || rid,
+    RegionId: rid,
+    _RegionId: rid
+  }
+}
+
 export function supportsHostExpand(row) {
-  return row?.name === CLOUD_VPS.alibaba.name || row?.name === CLOUD_VPS.tencent.name
+  return row?.name === CLOUD_VPS.alibaba.name
+    || row?.name === CLOUD_VPS.tencent.name
+    || row?.name === CLOUD_VPS.volcengine.name
+    || row?.name === CLOUD_VPS.jdcloud.name
+    || row?.name === CLOUD_VPS.baidu.name
 }
 
 /**
@@ -117,6 +178,72 @@ export async function fetchHostGroups(row, opts = {}) {
           const list = (res.InstanceSet || []).map(i => slimTencentInstance(i, rid))
           return list.length
             ? { regionId: rid, localName: reg.RegionName || rid, list }
+            : null
+        } catch (e) {
+          fails.push(`${rid}:${e.message || e}`)
+          return null
+        } finally {
+          done += 1
+          onProgress(done, regs.length)
+        }
+      })
+      for (const g of parts) if (g) groups.push(g)
+    } else if (row.name === CLOUD_VPS.volcengine.name) {
+      const regRes = await volcEcsRegions(row)
+      const regs = regRes.RegionSet || regRes.Regions || []
+      let done = 0
+      onProgress(0, regs.length)
+      const parts = await mapPool(regs, concurrency, async (reg) => {
+        const rid = reg.RegionId || reg.Region
+        try {
+          const res = await volcEcsAllInstances(row, { region: rid })
+          const list = (res.InstanceSet || []).map(i => slimVolcInstance(i, rid))
+          return list.length
+            ? { regionId: rid, localName: reg.LocalName || reg.RegionName || rid, list }
+            : null
+        } catch (e) {
+          fails.push(`${rid}:${e.message || e}`)
+          return null
+        } finally {
+          done += 1
+          onProgress(done, regs.length)
+        }
+      })
+      for (const g of parts) if (g) groups.push(g)
+    } else if (row.name === CLOUD_VPS.jdcloud.name) {
+      const regRes = await jdEcsRegions(row)
+      const regs = regRes.RegionSet || regRes.Regions || []
+      let done = 0
+      onProgress(0, regs.length)
+      const parts = await mapPool(regs, concurrency, async (reg) => {
+        const rid = reg.RegionId || reg.Region
+        try {
+          const res = await jdEcsAllInstances(row, { region: rid })
+          const list = (res.InstanceSet || []).map(i => slimJdOrBaiduInstance(i, rid))
+          return list.length
+            ? { regionId: rid, localName: reg.LocalName || reg.RegionName || rid, list }
+            : null
+        } catch (e) {
+          fails.push(`${rid}:${e.message || e}`)
+          return null
+        } finally {
+          done += 1
+          onProgress(done, regs.length)
+        }
+      })
+      for (const g of parts) if (g) groups.push(g)
+    } else if (row.name === CLOUD_VPS.baidu.name) {
+      const regRes = await baiduEcsRegions(row)
+      const regs = regRes.RegionSet || regRes.Regions || []
+      let done = 0
+      onProgress(0, regs.length)
+      const parts = await mapPool(regs, concurrency, async (reg) => {
+        const rid = reg.RegionId || reg.Region
+        try {
+          const res = await baiduEcsAllInstances(row, { region: rid })
+          const list = (res.InstanceSet || []).map(i => slimJdOrBaiduInstance(i, rid))
+          return list.length
+            ? { regionId: rid, localName: reg.LocalName || reg.RegionName || rid, list }
             : null
         } catch (e) {
           fails.push(`${rid}:${e.message || e}`)

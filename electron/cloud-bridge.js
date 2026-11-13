@@ -1,10 +1,13 @@
 /**
  * 多云 API 桥 — 还原自 king-akmanage 0.1.2
- * 腾讯 CAM/TAT · 华为 IAM · AWS STS/IAM · UCloud IAM · 阿里已在 main ali:request
+ * 腾讯 CAM/TAT · 华为 IAM · AWS STS/IAM · UCloud IAM · 火山引擎 IAM/ECS · 阿里已在 main ali:request
  */
 const crypto = require('crypto')
 const https = require('https')
 const hw = require('./huawei-signer')
+const volc = require('./volc-signer')
+const jd = require('./jdcloud-signer')
+const bce = require('./baidu-signer')
 
 function randPass() {
   // 腾讯云 CAM 要求：大写+小写+数字+特殊字符都要有，否则 AddUser 常直接 operation deny
@@ -1478,6 +1481,723 @@ async function tencentDescribeInstances({ access_key, secret_key, region, Offset
   }
 }
 
+/* ---------------- 火山引擎 Volcengine IAM / ECS ---------------- */
+function volcResult(res) {
+  return res?.Result ?? res
+}
+
+function volcErr(e, tip) {
+  const code = e?.code || e?.response?.ResponseMetadata?.Error?.Code || ''
+  const msg = e?.message || String(e)
+  return (tip ? tip + '：' : '') + (code ? `[${code}] ` : '') + msg
+}
+
+async function volcIam(access_key, secret_key, action, params) {
+  return volcResult(await volc.iam(access_key, secret_key, action, params || {}))
+}
+
+async function volcEcs(access_key, secret_key, region, action, params) {
+  return volcResult(await volc.ecs(access_key, secret_key, region, action, params || {}))
+}
+
+async function volcResolveAccountId(access_key, secret_key, hintUser) {
+  if (hintUser?.AccountId) return String(hintUser.AccountId)
+  try {
+    const gu = await volcIam(access_key, secret_key, 'GetUser', hintUser?.UserName ? { UserName: hintUser.UserName } : {})
+    const u = gu?.User || gu
+    if (u?.AccountId) return String(u.AccountId)
+  } catch {}
+  try {
+    const list = await volcIam(access_key, secret_key, 'ListUsers', { Limit: 1 })
+    const first = (list?.UserMetadata || list?.Users || [])[0]
+    if (first?.AccountId) return String(first.AccountId)
+  } catch {}
+  return ''
+}
+
+async function volcListUsers({ access_key, secret_key, Offset = 0, Limit = 100 }) {
+  return volcIam(access_key, secret_key, 'ListUsers', { Offset, Limit })
+}
+
+async function volcListPolicies({ access_key, secret_key, Scope = 'All', Limit = 100, Offset = 0 }) {
+  return volcIam(access_key, secret_key, 'ListPolicies', { Scope, Limit, Offset })
+}
+
+async function volcCreateAccessKey({ access_key, secret_key, UserName }) {
+  if (!UserName) throw new Error('UserName 不能为空')
+  return volcIam(access_key, secret_key, 'CreateAccessKey', { UserName })
+}
+
+async function volcListAccessKeys({ access_key, secret_key, UserName }) {
+  if (!UserName) throw new Error('UserName 不能为空')
+  return volcIam(access_key, secret_key, 'ListAccessKeys', { UserName })
+}
+
+async function volcListAttachedUserPolicies({ access_key, secret_key, UserName }) {
+  if (!UserName) throw new Error('UserName 不能为空')
+  return volcIam(access_key, secret_key, 'ListAttachedUserPolicies', { UserName })
+}
+
+async function volcDetachAllUserPolicies(access_key, secret_key, UserName) {
+  const attached = await volcListAttachedUserPolicies({ access_key, secret_key, UserName })
+  const list = attached?.AttachedPolicyMetadata || attached?.Policies || []
+  for (const p of list) {
+    const PolicyName = p.PolicyName
+    const PolicyType = p.PolicyType || 'System'
+    if (!PolicyName) continue
+    try {
+      await volcIam(access_key, secret_key, 'DetachUserPolicy', { UserName, PolicyName, PolicyType })
+    } catch {}
+  }
+}
+
+async function volcConsole({ access_key, secret_key, userName }) {
+  if (!access_key || !secret_key) throw new Error('AK/SK 为空，请检查资产密钥是否完整')
+  const name = (userName || 'console_king').trim()
+  const pass = randPass()
+
+  // 预检：能 ListUsers 说明 IAM 读权限基本可用
+  try {
+    await volcIam(access_key, secret_key, 'ListUsers', { Limit: 1 })
+  } catch (e) {
+    throw new Error(volcErr(e, '火山引擎 IAM 预检失败（ListUsers）'))
+  }
+
+  let user
+  try {
+    const created = await volcIam(access_key, secret_key, 'CreateUser', {
+      UserName: name,
+      DisplayName: name,
+      Description: 'created by Cloud Asset Hub'
+    })
+    user = created?.User || created
+  } catch (e) {
+    if (String(e.code || e.message).includes('UserAlreadyExists') || /already exists/i.test(e.message || '')) {
+      throw new Error(`用户 ${name} 已存在，请换用户名或先取消接管清理`)
+    }
+    throw new Error(volcErr(e, 'CreateUser'))
+  }
+
+  try {
+    await volcIam(access_key, secret_key, 'CreateLoginProfile', {
+      UserName: name,
+      Password: pass,
+      LoginAllowed: true,
+      PasswordResetRequired: false,
+      SafeAuthFlag: false
+    })
+  } catch (e) {
+    try { await volcIam(access_key, secret_key, 'DeleteUser', { UserName: name }) } catch {}
+    throw new Error(volcErr(e, 'CreateLoginProfile'))
+  }
+
+  try {
+    await volcIam(access_key, secret_key, 'AttachUserPolicy', {
+      UserName: name,
+      PolicyName: 'AdministratorAccess',
+      PolicyType: 'System'
+    })
+  } catch (e) {
+    // 尽量清理半成品
+    try { await volcIam(access_key, secret_key, 'DeleteLoginProfile', { UserName: name }) } catch {}
+    try { await volcIam(access_key, secret_key, 'DeleteUser', { UserName: name }) } catch {}
+    throw new Error(volcErr(e, 'AttachUserPolicy(AdministratorAccess)'))
+  }
+
+  const accountId = await volcResolveAccountId(access_key, secret_key, { ...user, UserName: name })
+  const loginUrl = accountId
+    ? `https://console.volcengine.com/auth/login/user/${accountId}`
+    : 'https://console.volcengine.com/auth/login/'
+
+  return {
+    userName: name,
+    password: pass,
+    OwnerUin: accountId || '',
+    accountId: accountId || '',
+    loginUrl,
+    policy: 'AdministratorAccess',
+    user: user || { UserName: name },
+    uuid: uuid()
+  }
+}
+
+async function volcCancel({ access_key, secret_key, console_data }) {
+  if (!console_data) throw new Error('暂无接管记录！')
+  const name = console_data.userName || console_data.user?.UserName
+  if (!name) throw new Error('暂无接管记录！')
+  await volcDetachAllUserPolicies(access_key, secret_key, name)
+  try { await volcIam(access_key, secret_key, 'DeleteLoginProfile', { UserName: name }) } catch {}
+  try {
+    await volcIam(access_key, secret_key, 'DeleteUser', { UserName: name })
+  } catch (e) {
+    throw new Error(volcErr(e, 'DeleteUser') + '（本地接管记录请手动决定是否清空）')
+  }
+  return true
+}
+
+async function volcDescribeRegions({ access_key, secret_key, region = 'cn-beijing' }) {
+  // DescribeRegions 可在任一开服地域调用；分页拉全
+  const regions = []
+  let next = ''
+  do {
+    const params = { MaxResults: 20 }
+    if (next) params.NextToken = next
+    const res = await volcEcs(access_key, secret_key, region, 'DescribeRegions', params)
+    const batch = res?.Regions || []
+    regions.push(...batch)
+    next = res?.NextToken || ''
+  } while (next)
+  return { Regions: regions, RegionSet: regions.map(r => ({
+    Region: r.RegionId,
+    RegionId: r.RegionId,
+    RegionName: r.RegionId,
+    LocalName: r.RegionId
+  })) }
+}
+
+async function volcDescribeInstances({
+  access_key, secret_key, region, MaxResults = 100, NextToken = ''
+}) {
+  if (!region) throw new Error('region 不能为空')
+  const params = { MaxResults: Math.min(Number(MaxResults) || 100, 100) }
+  if (NextToken) params.NextToken = NextToken
+  const res = await volcEcs(access_key, secret_key, region, 'DescribeInstances', params)
+  const list = (res?.Instances || []).map(i => {
+    const eipIp = typeof i.EipAddress === 'string'
+      ? i.EipAddress
+      : (i.EipAddress?.IpAddress || '')
+    const pub = []
+    if (eipIp) pub.push(eipIp)
+    if (Array.isArray(i.EipAddresses)) {
+      for (const x of i.EipAddresses) {
+        const ip = typeof x === 'string' ? x : x?.IpAddress
+        if (ip && !pub.includes(ip)) pub.push(ip)
+      }
+    }
+    const priv = []
+    if (i.PrimaryIpAddress) priv.push(i.PrimaryIpAddress)
+    for (const ni of (i.NetworkInterfaces || [])) {
+      if (ni.PrimaryIpAddress && !priv.includes(ni.PrimaryIpAddress)) priv.push(ni.PrimaryIpAddress)
+    }
+    return {
+      InstanceId: i.InstanceId,
+      InstanceName: i.InstanceName || i.InstanceId,
+      Status: i.Status,
+      InstanceState: i.Status,
+      Cpus: i.Cpus,
+      Cpu: i.Cpus,
+      MemorySize: i.MemorySize,
+      Memory: i.MemorySize,
+      OsName: i.OsName,
+      OSName: i.OsName,
+      OsType: i.OsType,
+      InstanceType: i.InstanceTypeId || i.InstanceType,
+      ZoneId: i.ZoneId,
+      CreatedTime: i.CreatedAt || i.CreationTime,
+      ExpiredTime: i.ExpiredAt || i.ExpiredTime,
+      PublicIpAddresses: pub,
+      PrivateIpAddresses: priv,
+      EipAddress: eipIp ? { IpAddress: eipIp } : null,
+      Region: region,
+      RegionId: region,
+      ProjectName: i.ProjectName
+    }
+  })
+  return {
+    InstanceSet: list,
+    Instances: list,
+    NextToken: res?.NextToken || '',
+    TotalCount: res?.TotalCount
+  }
+}
+
+/** 拉全某地域实例（NextToken 翻页） */
+async function volcDescribeAllInstances({ access_key, secret_key, region }) {
+  const all = []
+  let next = ''
+  do {
+    const page = await volcDescribeInstances({
+      access_key, secret_key, region, MaxResults: 100, NextToken: next
+    })
+    all.push(...(page.InstanceSet || []))
+    next = page.NextToken || ''
+  } while (next)
+  return { InstanceSet: all, Instances: all, TotalCount: all.length }
+}
+
+async function volcRunCommand({
+  access_key, secret_key, region, instanceId, command, type = 'Shell', timeout = 60
+}) {
+  if (!region) throw new Error('region 不能为空')
+  if (!instanceId) throw new Error('instanceId 不能为空')
+  const cmd = String(command || '').trim()
+  if (!cmd) throw new Error('命令不能为空')
+
+  const invocationName = 'cah_' + Date.now().toString(36)
+  const run = await volcEcs(access_key, secret_key, region, 'RunCommand', {
+    Type: type || 'Shell',
+    CommandContent: cmd,
+    ContentEncoding: 'PlainText',
+    InvocationName: invocationName,
+    WorkingDir: type === 'PowerShell' || type === 'Bat' ? 'C:\\' : '/home',
+    Timeout: Math.max(10, Number(timeout) || 60),
+    InstanceIds: [instanceId],
+    Username: type === 'PowerShell' || type === 'Bat' ? 'Administrator' : 'root'
+  })
+  const invocationId = run?.InvocationId
+  if (!invocationId) throw new Error('RunCommand 未返回 InvocationId')
+
+  // 轮询结果
+  let last = null
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 1500))
+    const res = await volcEcs(access_key, secret_key, region, 'DescribeInvocationResults', {
+      InvocationId: invocationId,
+      InstanceId: instanceId,
+      PageSize: 20,
+      PageNumber: 1
+    })
+    const rows = res?.InvocationResults || []
+    last = rows[0] || null
+    const st = last?.InvocationResultStatus
+    if (st && !['Pending', 'Running', 'Scheduled'].includes(st)) break
+  }
+
+  let output = ''
+  if (last?.Output) {
+    try {
+      output = Buffer.from(last.Output, 'base64').toString('utf8')
+    } catch {
+      output = last.Output
+    }
+  }
+  return {
+    InvocationId: invocationId,
+    status: last?.InvocationResultStatus || 'Unknown',
+    exitCode: last?.ExitCode,
+    output,
+    errorMessage: last?.ErrorMessage || '',
+    raw: last
+  }
+}
+
+async function volcDescribeInvocations({ access_key, secret_key, region, PageNumber = 1, PageSize = 50 }) {
+  if (!region) throw new Error('region 不能为空')
+  return volcEcs(access_key, secret_key, region, 'DescribeInvocations', {
+    PageNumber, PageSize, ContentEncoding: 'PlainText'
+  })
+}
+
+/* ---------------- 京东云 JDCloud IAM / VM ---------------- */
+const JD_VM_REGIONS = [
+  { RegionId: 'cn-north-1', LocalName: '华北-北京' },
+  { RegionId: 'cn-east-1', LocalName: '华东-宿迁' },
+  { RegionId: 'cn-east-2', LocalName: '华东-上海' },
+  { RegionId: 'cn-south-1', LocalName: '华南-广州' },
+  { RegionId: 'cn-north-2', LocalName: '华北-天津' },
+  { RegionId: 'cn-southwest-1', LocalName: '西南-成都' }
+]
+const JD_ADMIN_POLICY = 'JDCloudAdmin-New'
+
+async function jdDescribeUserPin(access_key, secret_key) {
+  const res = await jd.iam(access_key, secret_key, {
+    method: 'GET',
+    path: '/regions/cn-north-1/user:describeUserPin',
+    query: { accessKey: access_key }
+  })
+  return res?.result?.pin || res?.Result?.Pin || ''
+}
+
+async function jdListUsers({ access_key, secret_key, pageNumber = 1, pageSize = 100 }) {
+  return jd.iam(access_key, secret_key, {
+    method: 'GET',
+    path: '/subUsers',
+    query: { pageNumber: String(pageNumber), pageSize: String(pageSize) }
+  })
+}
+
+async function jdListPolicies({ access_key, secret_key, pageNumber = 1, pageSize = 100 }) {
+  // 京东云策略列表接口因账号权限差异较大，失败时回退空结构
+  try {
+    return await jd.iam(access_key, secret_key, {
+      method: 'GET',
+      path: '/policies',
+      query: { pageNumber: String(pageNumber), pageSize: String(pageSize) }
+    })
+  } catch (e) {
+    return { result: { policies: [], note: e.message, builtin: [JD_ADMIN_POLICY] } }
+  }
+}
+
+async function jdCreateAccessKey({ access_key, secret_key, subUser }) {
+  if (!subUser) throw new Error('subUser 不能为空')
+  // 官方 SDK：POST /v1/subUser/{subUser}/accessKey（非 :createSubUserAccessKey）
+  return jd.iam(access_key, secret_key, {
+    method: 'POST',
+    path: `/subUser/${encodeURIComponent(subUser)}/accessKey`,
+    body: {}
+  })
+}
+
+async function jdConsole({ access_key, secret_key, userName }) {
+  if (!access_key || !secret_key) throw new Error('AK/SK 为空')
+  const name = (userName || 'console_king').trim()
+  const pass = randPass()
+  try {
+    await jdListUsers({ access_key, secret_key, pageNumber: 1, pageSize: 1 })
+  } catch (e) {
+    throw new Error('京东云 IAM 预检失败：' + (e.message || e))
+  }
+  try {
+    await jd.iam(access_key, secret_key, {
+      method: 'POST',
+      path: '/subUser',
+      body: {
+        createSubUserInfo: {
+          name,
+          password: pass,
+          consoleLogin: true,
+          createAk: false,
+          needResetPassword: false,
+          description: 'created by Cloud Asset Hub'
+        }
+      }
+    })
+  } catch (e) {
+    throw new Error('createSubUser：' + (e.message || e))
+  }
+  try {
+    await jd.iam(access_key, secret_key, {
+      method: 'POST',
+      path: `/subUser/${encodeURIComponent(name)}:attachSubUserPolicy`,
+      body: { subUser: name, policyName: JD_ADMIN_POLICY }
+    })
+  } catch (e) {
+    try { await jd.iam(access_key, secret_key, { method: 'DELETE', path: `/subUser/${encodeURIComponent(name)}` }) } catch {}
+    throw new Error(`attachSubUserPolicy(${JD_ADMIN_POLICY})：` + (e.message || e))
+  }
+  let pin = ''
+  try { pin = await jdDescribeUserPin(access_key, secret_key) } catch {}
+  const loginUrl = pin
+    ? `https://login.jdcloud.com/subAccount/login/${pin}`
+    : 'https://login.jdcloud.com/'
+  return {
+    userName: name,
+    password: pass,
+    OwnerUin: pin,
+    accountId: pin,
+    loginUrl,
+    policy: JD_ADMIN_POLICY,
+    user: { name, pin },
+    uuid: uuid()
+  }
+}
+
+async function jdCancel({ access_key, secret_key, console_data }) {
+  if (!console_data) throw new Error('暂无接管记录！')
+  const name = console_data.userName || console_data.user?.name
+  if (!name) throw new Error('暂无接管记录！')
+  try {
+    // 官方 SDK：DELETE /v1/subUser/{subUser}:detachSubUserPolicy
+    await jd.iam(access_key, secret_key, {
+      method: 'DELETE',
+      path: `/subUser/${encodeURIComponent(name)}:detachSubUserPolicy`,
+      query: { policyName: JD_ADMIN_POLICY }
+    })
+  } catch {}
+  await jd.iam(access_key, secret_key, {
+    method: 'DELETE',
+    path: `/subUser/${encodeURIComponent(name)}`
+  })
+  return true
+}
+
+async function jdDescribeRegions() {
+  return {
+    Regions: JD_VM_REGIONS,
+    RegionSet: JD_VM_REGIONS.map(r => ({
+      Region: r.RegionId, RegionId: r.RegionId, RegionName: r.LocalName, LocalName: r.LocalName
+    }))
+  }
+}
+
+async function jdDescribeInstances({ access_key, secret_key, region, pageNumber = 1, pageSize = 100 }) {
+  if (!region) throw new Error('region 不能为空')
+  const res = await jd.vm(access_key, secret_key, region, {
+    method: 'GET',
+    path: `/regions/${region}/instances`,
+    query: { pageNumber: String(pageNumber), pageSize: String(pageSize) }
+  })
+  const result = res?.result || res?.Result || {}
+  const list = (result.instances || result.Instances || []).map(i => {
+    const pub = []
+    const eip = i.elasticIpAddress || i.ElasticIpAddress || i.publicIp || i.PublicIp
+    if (eip) pub.push(eip)
+    if (Array.isArray(i.elasticIps)) {
+      for (const x of i.elasticIps) {
+        const ip = typeof x === 'string' ? x : x?.elasticIpAddress
+        if (ip && !pub.includes(ip)) pub.push(ip)
+      }
+    }
+    const priv = []
+    const pip = i.privateIpAddress || i.PrivateIpAddress || i.primaryNetworkInterface?.networkInterface?.primaryIp?.privateIpAddress
+    if (pip) priv.push(pip)
+    return {
+      InstanceId: i.instanceId || i.InstanceId,
+      InstanceName: i.instanceName || i.InstanceName || i.instanceId,
+      Status: i.status || i.Status,
+      InstanceState: i.status || i.Status,
+      Cpu: i.cpu || i.Cpu,
+      Cpus: i.cpu || i.Cpu,
+      Memory: i.memoryMB || i.memory || i.Memory,
+      MemorySize: i.memoryMB || i.memory || i.Memory,
+      OsName: i.osName || i.imageName || i.OsName,
+      OSName: i.osName || i.imageName,
+      InstanceType: i.instanceType || i.InstanceType,
+      ZoneId: i.az || i.Az || i.zone,
+      CreatedTime: i.launchTime || i.createTime || i.CreatedTime,
+      ExpiredTime: i.chargeOnStopped || i.ExpiredTime,
+      PublicIpAddresses: pub,
+      PrivateIpAddresses: priv,
+      EipAddress: eip ? { IpAddress: eip } : null,
+      Region: region,
+      RegionId: region
+    }
+  })
+  return {
+    InstanceSet: list,
+    Instances: list,
+    TotalCount: result.totalCount || result.TotalCount || list.length,
+    pageNumber: result.pageNumber || pageNumber
+  }
+}
+
+async function jdDescribeAllInstances({ access_key, secret_key, region }) {
+  const all = []
+  let page = 1
+  for (;;) {
+    const res = await jdDescribeInstances({ access_key, secret_key, region, pageNumber: page, pageSize: 100 })
+    const batch = res.InstanceSet || []
+    all.push(...batch)
+    const total = res.TotalCount || 0
+    if (!batch.length || all.length >= total || batch.length < 100) break
+    page += 1
+    if (page > 50) break
+  }
+  return { InstanceSet: all, Instances: all, TotalCount: all.length }
+}
+
+/* ---------------- 百度智能云 IAM / BCC ---------------- */
+const BAIDU_BCC_REGIONS = [
+  { RegionId: 'bj', LocalName: '华北-北京' },
+  { RegionId: 'bd', LocalName: '华北-保定' },
+  { RegionId: 'su', LocalName: '华东-苏州' },
+  { RegionId: 'gz', LocalName: '华南-广州' },
+  { RegionId: 'fwh', LocalName: '华中-武汉' },
+  { RegionId: 'cd', LocalName: '西南-成都' },
+  { RegionId: 'hkg', LocalName: '香港' }
+]
+const BAIDU_ADMIN_POLICY = 'SystemAdminPolicy'
+
+async function baiduListUsers({ access_key, secret_key }) {
+  return bce.iam(access_key, secret_key, { method: 'GET', path: '/v1/user' })
+}
+
+async function baiduListPolicies({ access_key, secret_key, policyType = 'System' }) {
+  try {
+    // 官方文档：GET /v1/policy?policyType=System（单数 policy）
+    return await bce.iam(access_key, secret_key, {
+      method: 'GET',
+      path: '/v1/policy',
+      query: { policyType }
+    })
+  } catch (e) {
+    return { policies: [], note: e.message, builtin: [BAIDU_ADMIN_POLICY] }
+  }
+}
+
+async function baiduCreateAccessKey({ access_key, secret_key, userName }) {
+  if (!userName) throw new Error('userName 不能为空')
+  return bce.iam(access_key, secret_key, {
+    method: 'POST',
+    path: `/v1/user/${encodeURIComponent(userName)}/accesskey`
+  })
+}
+
+async function baiduConsole({ access_key, secret_key, userName }) {
+  if (!access_key || !secret_key) throw new Error('AK/SK 为空')
+  const name = (userName || 'console_king').trim()
+  const pass = randPass()
+  try {
+    await baiduListUsers({ access_key, secret_key })
+  } catch (e) {
+    throw new Error('百度云 IAM 预检失败：' + (e.message || e))
+  }
+  try {
+    await bce.iam(access_key, secret_key, {
+      method: 'POST',
+      path: '/v1/user',
+      body: { name, description: 'created by Cloud Asset Hub' }
+    })
+  } catch (e) {
+    throw new Error('CreateUser：' + (e.message || e))
+  }
+  try {
+    await bce.iam(access_key, secret_key, {
+      method: 'PUT',
+      path: `/v1/user/${encodeURIComponent(name)}/loginProfile`,
+      body: {
+        password: pass,
+        enabledLoginMfa: false,
+        needResetPassword: false
+      }
+    })
+  } catch (e) {
+    try { await bce.iam(access_key, secret_key, { method: 'DELETE', path: `/v1/user/${encodeURIComponent(name)}` }) } catch {}
+    throw new Error('CreateLoginProfile：' + (e.message || e))
+  }
+  try {
+    await bce.iam(access_key, secret_key, {
+      method: 'PUT',
+      path: `/v1/user/${encodeURIComponent(name)}/policy/${encodeURIComponent(BAIDU_ADMIN_POLICY)}`,
+      query: { policyType: 'System' }
+    })
+  } catch (e) {
+    try { await bce.iam(access_key, secret_key, { method: 'DELETE', path: `/v1/user/${encodeURIComponent(name)}/loginProfile` }) } catch {}
+    try { await bce.iam(access_key, secret_key, { method: 'DELETE', path: `/v1/user/${encodeURIComponent(name)}` }) } catch {}
+    throw new Error(`AttachPolicy(${BAIDU_ADMIN_POLICY})：` + (e.message || e))
+  }
+  return {
+    userName: name,
+    password: pass,
+    OwnerUin: '',
+    accountId: '',
+    loginUrl: 'https://login.bce.baidu.com/',
+    policy: BAIDU_ADMIN_POLICY,
+    hint: '登录页选择「子用户登录」，输入主账号 ID/别名 + 子用户名 + 密码',
+    user: { name },
+    uuid: uuid()
+  }
+}
+
+async function baiduCancel({ access_key, secret_key, console_data }) {
+  if (!console_data) throw new Error('暂无接管记录！')
+  const name = console_data.userName || console_data.user?.name
+  if (!name) throw new Error('暂无接管记录！')
+  try {
+    await bce.iam(access_key, secret_key, {
+      method: 'DELETE',
+      path: `/v1/user/${encodeURIComponent(name)}/policy/${encodeURIComponent(BAIDU_ADMIN_POLICY)}`,
+      query: { policyType: 'System' }
+    })
+  } catch {}
+  try {
+    await bce.iam(access_key, secret_key, {
+      method: 'DELETE',
+      path: `/v1/user/${encodeURIComponent(name)}/loginProfile`
+    })
+  } catch {}
+  await bce.iam(access_key, secret_key, {
+    method: 'DELETE',
+    path: `/v1/user/${encodeURIComponent(name)}`
+  })
+  return true
+}
+
+async function baiduDescribeRegions({ access_key, secret_key }) {
+  try {
+    const res = await bce.bcc(access_key, secret_key, '', {
+      method: 'POST',
+      path: '/v2/region/describeRegions',
+      body: { region: '' }
+    })
+    const regions = (res?.regions || []).map(r => ({
+      RegionId: r.regionId || r.RegionId,
+      LocalName: r.regionName || r.RegionName || r.regionId,
+      RegionEndpoint: r.regionEndpoint
+    })).filter(r => r.RegionId)
+    if (regions.length) {
+      return {
+        Regions: regions,
+        RegionSet: regions.map(r => ({
+          Region: r.RegionId, RegionId: r.RegionId, RegionName: r.LocalName, LocalName: r.LocalName
+        }))
+      }
+    }
+  } catch {}
+  return {
+    Regions: BAIDU_BCC_REGIONS,
+    RegionSet: BAIDU_BCC_REGIONS.map(r => ({
+      Region: r.RegionId, RegionId: r.RegionId, RegionName: r.LocalName, LocalName: r.LocalName
+    }))
+  }
+}
+
+async function baiduDescribeInstances({ access_key, secret_key, region, marker = '', maxKeys = 100 }) {
+  if (!region) throw new Error('region 不能为空')
+  const query = { maxKeys: String(Math.min(Number(maxKeys) || 100, 1000)) }
+  if (marker) query.marker = marker
+  const res = await bce.bcc(access_key, secret_key, region, {
+    method: 'GET',
+    path: '/v2/instance',
+    query
+  })
+  const list = (res?.instances || []).map(i => {
+    const pub = []
+    const eip = i.publicIp || i.eip || i.floatingIp
+    if (eip && eip !== 'null') pub.push(eip)
+    const nic = i.nicInfo || i.networkInterface || {}
+    for (const ip of (nic.ips || [])) {
+      if (ip.eip && ip.eip !== 'null' && !pub.includes(ip.eip)) pub.push(ip.eip)
+    }
+    const priv = []
+    if (i.internalIp) priv.push(i.internalIp)
+    for (const ip of (nic.ips || [])) {
+      if (ip.privateIp && !priv.includes(ip.privateIp)) priv.push(ip.privateIp)
+    }
+    return {
+      InstanceId: i.id || i.instanceId,
+      InstanceName: i.name || i.instanceName || i.id,
+      Status: i.status,
+      InstanceState: i.status,
+      Cpu: i.cpuCount || i.cpu,
+      Cpus: i.cpuCount || i.cpu,
+      Memory: i.memoryCapacityInGB ? i.memoryCapacityInGB * 1024 : i.memory,
+      MemorySize: i.memoryCapacityInGB ? i.memoryCapacityInGB * 1024 : i.memory,
+      OsName: i.osName || i.osVersion || i.imageName,
+      OSName: i.osName || i.osVersion,
+      InstanceType: i.spec || i.instanceType,
+      ZoneId: i.zoneName || i.zone,
+      CreatedTime: i.createTime || i.createdTime,
+      ExpiredTime: i.expireTime,
+      PublicIpAddresses: pub,
+      PrivateIpAddresses: priv,
+      EipAddress: pub[0] ? { IpAddress: pub[0] } : null,
+      Region: region,
+      RegionId: region
+    }
+  })
+  return {
+    InstanceSet: list,
+    Instances: list,
+    nextMarker: res?.nextMarker || '',
+    isTruncated: !!res?.isTruncated,
+    TotalCount: list.length
+  }
+}
+
+async function baiduDescribeAllInstances({ access_key, secret_key, region }) {
+  const all = []
+  let marker = ''
+  for (let i = 0; i < 50; i++) {
+    const page = await baiduDescribeInstances({ access_key, secret_key, region, marker, maxKeys: 100 })
+    all.push(...(page.InstanceSet || []))
+    if (!page.isTruncated || !page.nextMarker) break
+    marker = page.nextMarker
+  }
+  return { InstanceSet: all, Instances: all, TotalCount: all.length }
+}
+
 module.exports = {
   randPass,
   tencentConsole, tencentCancel, tencentListUsers, tencentRunCommand,
@@ -1485,6 +2205,13 @@ module.exports = {
   huaweiConsole, huaweiCancel,
   awsConsole, awsListUsers, awsCreateAccessKey, awsListPolicies,
   ucloudListProjects, ucloudConsole, ucloudCancel, ucloudOrderList, ucloudListUsers, ucloudGetUserInfoList,
+  volcConsole, volcCancel, volcListUsers, volcListPolicies, volcCreateAccessKey, volcListAccessKeys,
+  volcListAttachedUserPolicies, volcDescribeRegions, volcDescribeInstances, volcDescribeAllInstances,
+  volcRunCommand, volcDescribeInvocations,
+  jdConsole, jdCancel, jdListUsers, jdListPolicies, jdCreateAccessKey,
+  jdDescribeRegions, jdDescribeInstances, jdDescribeAllInstances,
+  baiduConsole, baiduCancel, baiduListUsers, baiduListPolicies, baiduCreateAccessKey,
+  baiduDescribeRegions, baiduDescribeInstances, baiduDescribeAllInstances,
   ossListBuckets, ossListObjects,
   tencentListUsersRaw, tencentDescribeDomains, huaweiListUsers,
   cosListBuckets, cosListObjects, httpRequest,

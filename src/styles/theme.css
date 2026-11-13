@@ -118,9 +118,11 @@ html, body, #app {
 .prov-dot[data-k="huawei_cloud"] { background: var(--c-hw); }
 .prov-dot[data-k="ucloud_cloud"] { background: var(--c-uc); }
 .prov-dot[data-k="aws_cloud"], .prov-dot[data-k="aws"] { background: var(--c-aws); }
+.prov-dot[data-k="volcengine_cloud"], .prov-dot[data-k="volcengine"] { background: #1664ff; }
+.prov-dot[data-k="jdcloud_cloud"], .prov-dot[data-k="jd"] { background: var(--c-jd); }
+.prov-dot[data-k="baidu_cloud"], .prov-dot[data-k="baidu"] { background: #2932e1; }
 .prov-dot[data-k="qiniu"] { background: var(--c-qiniu); }
 .prov-dot[data-k="upyun"] { background: var(--c-upyun); }
-.prov-dot[data-k="jd"] { background: var(--c-jd); }
 .prov-dot[data-k="minio"] { background: var(--c-minio); }
 .prov-dot[data-k="qingstor"] { background: #00ad9f; }
 .prov-dot[data-k="ks3"] { background: #1a6cff; }
@@ -143,6 +145,9 @@ html, body, #app {
 .cloud-chip.hw { background: #fdecee; border-color: #f5c2cb; color: #a00822; }
 .cloud-chip.uc { background: #eef4ff; border-color: #c8daf8; color: #2458c4; }
 .cloud-chip.aws { background: #fff6e8; border-color: #ffe0ad; color: #b36b00; }
+.cloud-chip.volc { background: #eef3ff; border-color: #c9d8ff; color: #1664ff; }
+.cloud-chip.jd { background: #fff1f0; border-color: #ffccc7; color: #cf1322; }
+.cloud-chip.baidu { background: #eef0ff; border-color: #c9ceff; color: #2932e1; }
 
 /* 空状态 */
 .ak-empty {

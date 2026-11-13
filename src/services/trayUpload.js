@@ -28,7 +28,7 @@ function putPayload(tray, localPath, objectKey) {
     opts: {
       region: tray.region || 'us-east-1',
       endpoint: tray.endpoint || undefined,
-      forcePathStyle: ['minio', 'ks3', 'jd'].includes(k),
+      forcePathStyle: ['minio', 'ks3', 'jd', 'baidu'].includes(k),
       bucket: tray.bucket_name,
       key: objectKey,
       localPath

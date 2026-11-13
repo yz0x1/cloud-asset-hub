@@ -4,7 +4,10 @@ export const CLOUD_VPS = {
   tencent: { key: 'tencent_cloud', name: '腾讯云' },
   huawei: { key: 'huawei_cloud', name: '华为云' },
   ucloud: { key: 'ucloud_cloud', name: 'ucloud' },
-  aws: { key: 'aws_cloud', name: 'AWS' }
+  aws: { key: 'aws_cloud', name: 'AWS' },
+  volcengine: { key: 'volcengine_cloud', name: '火山引擎' },
+  jdcloud: { key: 'jdcloud_cloud', name: '京东云' },
+  baidu: { key: 'baidu_cloud', name: '百度云' }
 }
 
 /**
@@ -69,7 +72,9 @@ export const STORAGE_PROVIDERS = [
   { key: 'aws', name: 'AWS-S3', features: ['paging','manualPrivateBucket'] },
   { key: 'jd', name: '京东云', features: ['paging','manualPrivateBucket'] },
   { key: 'ks3', name: '金山云', features: ['paging'] },
-  { key: 'minio', name: 'MinIO', features: ['paging','manualPrivateBucket'] }
+  { key: 'minio', name: 'MinIO', features: ['paging','manualPrivateBucket'] },
+  { key: 'volcengine', name: '火山引擎 TOS', features: ['paging','manualPrivateBucket'] },
+  { key: 'baidu', name: '百度 BOS', features: ['paging','manualPrivateBucket'] }
 ]
 
 /** 原版 OperationCodeList */

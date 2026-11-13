@@ -500,8 +500,8 @@ import {
   storagePut, storageGet, storageSign, storageDelete, storageMkdir, storageMove, qiniuRefreshCdn
 } from '@/services/cloud'
 
-const S3 = new Set(['aws', 'minio', 'ks3', 'jd'])
-const RW = new Set(['aliyun', 'tencent', 'qiniu', 'qingstor', 'upyun', 'aws', 'minio', 'ks3', 'jd'])
+const S3 = new Set(['aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'])
+const RW = new Set(['aliyun', 'tencent', 'qiniu', 'qingstor', 'upyun', 'aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'])
 
 const providers = STORAGE_PROVIDERS
 const store = useVpsStore()
@@ -587,11 +587,11 @@ const accForm = reactive({
 })
 
 const canRW = computed(() => RW.has(current.value?.key))
-const canSign = computed(() => ['aliyun', 'tencent', 'qiniu', 'aws', 'minio', 'ks3', 'jd'].includes(current.value?.key))
-const canMkdir = computed(() => ['aliyun', 'tencent', 'qingstor', 'upyun', 'aws', 'minio', 'ks3', 'jd'].includes(current.value?.key))
-const canMove = computed(() => ['aliyun', 'tencent', 'qiniu', 'qingstor', 'upyun', 'aws', 'minio', 'ks3', 'jd'].includes(current.value?.key))
+const canSign = computed(() => ['aliyun', 'tencent', 'qiniu', 'aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(current.value?.key))
+const canMkdir = computed(() => ['aliyun', 'tencent', 'qingstor', 'upyun', 'aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(current.value?.key))
+const canMove = computed(() => ['aliyun', 'tencent', 'qiniu', 'qingstor', 'upyun', 'aws', 'minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(current.value?.key))
 const showRegion = computed(() => current.value?.key === 'aliyun' || S3.has(current.value?.key))
-const needsEndpoint = computed(() => ['minio', 'ks3', 'jd'].includes(current.value?.key))
+const needsEndpoint = computed(() => ['minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(current.value?.key))
 const previewIsImg = computed(() => /\.(png|jpe?g|gif|webp|bmp|svg)(\?|$)/i.test(previewUrl.value))
 const savedForProvider = computed(() => stStore.list.filter(x => !current.value || x.key === current.value.key))
 const akOptions = computed(() => {
@@ -599,6 +599,9 @@ const akOptions = computed(() => {
   if (k === 'aliyun') return store.list.filter(v => v.name === CLOUD_VPS.alibaba.name)
   if (k === 'tencent') return store.list.filter(v => v.name === CLOUD_VPS.tencent.name)
   if (k === 'aws') return store.list.filter(v => v.name === CLOUD_VPS.aws.name)
+  if (k === 'volcengine') return store.list.filter(v => v.name === CLOUD_VPS.volcengine.name)
+  if (k === 'jd') return store.list.filter(v => v.name === CLOUD_VPS.jdcloud.name)
+  if (k === 'baidu') return store.list.filter(v => v.name === CLOUD_VPS.baidu.name)
   return store.list
 })
 const displayRows = computed(() => [...prefixes.value, ...objects.value])
@@ -625,8 +628,8 @@ const fileStats = computed(() => {
 const crumbs = computed(() => prefix.value.split('/').filter(Boolean))
 const signExpires = computed(() => Math.max(60, (opts.deadlineMin || 60) * 60))
 const activeProvider = computed(() => providers.find(p => p.key === assetSubTab.value) || null)
-const showCredRegion = computed(() => ['aliyun', 'aws', 'jd', 'ks3', 'minio', 'qingstor'].includes(assetSubTab.value))
-const showCredEndpoint = computed(() => ['minio', 'ks3', 'jd'].includes(assetSubTab.value))
+const showCredRegion = computed(() => ['aliyun', 'aws', 'jd', 'ks3', 'minio', 'qingstor', 'volcengine', 'baidu'].includes(assetSubTab.value))
+const showCredEndpoint = computed(() => ['minio', 'ks3', 'jd', 'volcengine', 'baidu'].includes(assetSubTab.value))
 const regionPlaceholder = computed(() => {
   const m = {
     aliyun: 'oss-cn-hangzhou',
@@ -634,7 +637,9 @@ const regionPlaceholder = computed(() => {
     jd: 'cn-north-1',
     ks3: 'BEIJING',
     minio: 'us-east-1',
-    qingstor: 'pek3a'
+    qingstor: 'pek3a',
+    volcengine: 'cn-beijing',
+    baidu: 'bj'
   }
   return m[assetSubTab.value] || 'region'
 })
@@ -647,7 +652,9 @@ const KEY_HELP = {
   upyun: 'https://console.upyun.com/',
   jd: 'https://iam-console.jdcloud.com/',
   ks3: 'https://uc.console.ksyun.com/pro/iam/#/accessKey',
-  minio: 'https://min.io/docs/minio/linux/administration/identity-access-management.html'
+  minio: 'https://min.io/docs/minio/linux/administration/identity-access-management.html',
+  volcengine: 'https://console.volcengine.com/iam/keymanage/',
+  baidu: 'https://console.bce.baidu.com/iam/#/iam/accesslist'
 }
 
 function providerName(key) {
@@ -670,7 +677,9 @@ function resetCredForm() {
     region: regionPlaceholder.value === 'region' ? '' : regionPlaceholder.value,
     endpoint: key === 'minio' ? 'http://127.0.0.1:9000'
       : key === 'ks3' ? 'https://ks3-cn-beijing.ksyun.com'
-        : key === 'jd' ? 'https://s3.cn-north-1.jdcloud-oss.com' : '',
+        : key === 'jd' ? 'https://s3.cn-north-1.jdcloud-oss.com'
+          : key === 'volcengine' ? 'https://tos-s3-cn-beijing.volces.com'
+            : key === 'baidu' ? 'https://s3.bj.bcebos.com' : '',
     service_name: '',
     domain: '',
     notes: '',
@@ -939,7 +948,7 @@ function s3Opts() {
   return {
     region: region.value,
     endpoint: needsEndpoint.value ? endpoint.value : undefined,
-    forcePathStyle: ['minio', 'ks3', 'jd'].includes(current.value.key)
+    forcePathStyle: ['minio', 'ks3', 'jd', 'baidu'].includes(current.value.key)
   }
 }
 function open(p) {
@@ -955,6 +964,8 @@ function open(p) {
   if (p.key === 'minio') { region.value = 'us-east-1'; endpoint.value = 'http://127.0.0.1:9000' }
   if (p.key === 'ks3') { region.value = 'BEIJING'; endpoint.value = 'https://ks3-cn-beijing.ksyun.com' }
   if (p.key === 'jd') { region.value = 'cn-north-1'; endpoint.value = 'https://s3.cn-north-1.jdcloud-oss.com' }
+  if (p.key === 'volcengine') { region.value = 'cn-beijing'; endpoint.value = 'https://tos-s3-cn-beijing.volces.com' }
+  if (p.key === 'baidu') { region.value = 'bj'; endpoint.value = 'https://s3.bj.bcebos.com' }
 }
 function onSavedPick() {
   const s = stStore.list.find(x => x.id === savedId.value)

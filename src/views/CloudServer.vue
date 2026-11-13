@@ -120,15 +120,15 @@
                         command="domains"
                       >域名列表</el-dropdown-item>
                       <el-dropdown-item
-                        v-if="row.name === CLOUD_VPS.aws.name"
+                        v-if="canPolicies(row)"
                         command="awsPolicies"
                       >策略列表</el-dropdown-item>
                       <el-dropdown-item
-                        v-if="row.name === CLOUD_VPS.aws.name"
+                        v-if="canAkBackdoor(row)"
                         command="awsBackdoor"
                       >创建后门</el-dropdown-item>
                       <el-dropdown-item
-                        v-if="row.name === CLOUD_VPS.aws.name"
+                        v-if="canAkBackdoor(row)"
                         command="awsBackdoorView"
                       >查看后门信息</el-dropdown-item>
                       <el-dropdown-item
@@ -250,7 +250,11 @@ import ConsolePanel from '@/components/ConsolePanel.vue'
 import RemoteCommand from '@/components/RemoteCommand.vue'
 import AssetHostExpand from '@/components/AssetHostExpand.vue'
 import JsonViewer from '@/components/JsonViewer.vue'
-import { tencentUsers, tencentDomains, huaweiUsers, ucloudOrders, awsPolicies, awsCreateKey } from '@/services/cloud'
+import {
+  tencentUsers, tencentDomains, huaweiUsers, ucloudOrders,
+  awsPolicies, awsCreateKey, volcUsers, volcPolicies, volcCreateKey,
+  jdUsers, jdPolicies, jdCreateKey, baiduUsers, baiduPolicies, baiduCreateKey
+} from '@/services/cloud'
 import { createRamClientAli, aliListUsers } from '@/services/aliyun/ram'
 
 const store = useVpsStore()
@@ -361,11 +365,38 @@ function chipClass(row) {
   if (k.includes('huawei') || row.name === '华为云') return 'hw'
   if (k.includes('ucloud')) return 'uc'
   if (k.includes('aws') || row.name === 'AWS') return 'aws'
+  if (k.includes('volc') || row.name === '火山引擎') return 'volc'
+  if (k.includes('jdcloud') || row.name === '京东云') return 'jd'
+  if (k.includes('baidu') || row.name === '百度云') return 'baidu'
   return ''
 }
 function canUsers(row) {
-  return [ALI.name, CLOUD_VPS.tencent.name, CLOUD_VPS.huawei.name, CLOUD_VPS.aws.name, CLOUD_VPS.ucloud.name]
-    .includes(row.name)
+  return [
+    ALI.name, CLOUD_VPS.tencent.name, CLOUD_VPS.huawei.name,
+    CLOUD_VPS.aws.name, CLOUD_VPS.ucloud.name, CLOUD_VPS.volcengine.name,
+    CLOUD_VPS.jdcloud.name, CLOUD_VPS.baidu.name
+  ].includes(row.name)
+}
+function canPolicies(row) {
+  return [
+    CLOUD_VPS.aws.name, CLOUD_VPS.volcengine.name,
+    CLOUD_VPS.jdcloud.name, CLOUD_VPS.baidu.name
+  ].includes(row.name)
+}
+function canAkBackdoor(row) {
+  return canPolicies(row)
+}
+function vendorLabel(row) {
+  if (row?.name === CLOUD_VPS.volcengine.name) return '火山引擎'
+  if (row?.name === CLOUD_VPS.jdcloud.name) return '京东云'
+  if (row?.name === CLOUD_VPS.baidu.name) return '百度云'
+  if (row?.name === CLOUD_VPS.aws.name) return 'AWS'
+  return row?.name || ''
+}
+function normalizeUserOptions(list) {
+  return (Array.isArray(list) ? list : []).map(u => ({
+    UserName: u.UserName || u.userName || u.name || u.Name
+  })).filter(u => u.UserName)
 }
 function switchTab(key) {
   subTab.value = key
@@ -475,6 +506,12 @@ async function viewUsers(row) {
       })
       if (!r.ok) throw new Error(r.error)
       data = r.data
+    } else if (row.name === CLOUD_VPS.volcengine.name) {
+      data = await volcUsers(row)
+    } else if (row.name === CLOUD_VPS.jdcloud.name) {
+      data = await jdUsers(row)
+    } else if (row.name === CLOUD_VPS.baidu.name) {
+      data = await baiduUsers(row)
     } else {
       return ElMessage.info('该云厂商用户列表待扩展')
     }
@@ -497,8 +534,12 @@ async function viewDomains(row) {
 }
 async function viewAwsPolicies(row) {
   try {
-    const data = await awsPolicies(row, { Scope: 'All' })
-    jsonTitle.value = 'AWS 策略列表'
+    let data
+    if (row.name === CLOUD_VPS.volcengine.name) data = await volcPolicies(row, { Scope: 'All' })
+    else if (row.name === CLOUD_VPS.jdcloud.name) data = await jdPolicies(row)
+    else if (row.name === CLOUD_VPS.baidu.name) data = await baiduPolicies(row)
+    else data = await awsPolicies(row, { Scope: 'All' })
+    jsonTitle.value = vendorLabel(row) + ' 策略列表'
     jsonData.value = data
     jsonVisible.value = true
   } catch (e) { ElMessage.error(e.message) }
@@ -509,13 +550,23 @@ async function openAwsBackdoor(row) {
   awsUsers.value = []
   awsPermVisible.value = true
   try {
-    if (!window.akCloud) throw new Error('请在 Electron 中运行')
-    const r = await window.akCloud.awsListUsers({
-      access_key: row.access_key, secret_key: row.secret_key, region: 'us-east-1'
-    })
-    if (!r.ok) throw new Error(r.error)
-    const list = r.data?.Users || r.data?.users || r.data || []
-    awsUsers.value = Array.isArray(list) ? list : []
+    if (row.name === CLOUD_VPS.volcengine.name) {
+      const data = await volcUsers(row)
+      awsUsers.value = normalizeUserOptions(data?.UserMetadata || data?.Users || data)
+    } else if (row.name === CLOUD_VPS.jdcloud.name) {
+      const data = await jdUsers(row)
+      awsUsers.value = normalizeUserOptions(data?.result?.subUsers || data?.result?.SubUsers || data?.subUsers || data)
+    } else if (row.name === CLOUD_VPS.baidu.name) {
+      const data = await baiduUsers(row)
+      awsUsers.value = normalizeUserOptions(data?.users || data?.Users || data)
+    } else {
+      if (!window.akCloud) throw new Error('请在 Electron 中运行')
+      const r = await window.akCloud.awsListUsers({
+        access_key: row.access_key, secret_key: row.secret_key, region: 'us-east-1'
+      })
+      if (!r.ok) throw new Error(r.error)
+      awsUsers.value = normalizeUserOptions(r.data?.Users || r.data?.users || r.data)
+    }
   } catch (e) {
     ElMessage.warning('拉取用户列表失败，可手动输入用户名：' + (e.message || e))
   }
@@ -524,10 +575,15 @@ async function doCreateAwsAk() {
   if (!awsRow.value || !awsUserName.value) return ElMessage.error('请选择要创建的用户！')
   awsBusy.value = true
   try {
-    const data = await awsCreateKey(awsRow.value, awsUserName.value.trim())
-    // 对齐原版：写入行内「注入用户」，供「查看后门信息」
-    await store.update({ id: awsRow.value.id, 注入用户: JSON.parse(JSON.stringify(data)) })
-    jsonTitle.value = 'AWS 新建 AccessKey（请立即保存 Secret）'
+    const name = awsUserName.value.trim()
+    const row = awsRow.value
+    let data
+    if (row.name === CLOUD_VPS.volcengine.name) data = await volcCreateKey(row, name)
+    else if (row.name === CLOUD_VPS.jdcloud.name) data = await jdCreateKey(row, name)
+    else if (row.name === CLOUD_VPS.baidu.name) data = await baiduCreateKey(row, name)
+    else data = await awsCreateKey(row, name)
+    await store.update({ id: row.id, 注入用户: JSON.parse(JSON.stringify(data)) })
+    jsonTitle.value = vendorLabel(row) + ' 新建 AccessKey（请立即保存 Secret）'
     jsonData.value = data
     jsonVisible.value = true
     ElMessage.success('创建完成，已保存用户信息。')

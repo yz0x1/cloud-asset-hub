@@ -1,7 +1,7 @@
 <template>
   <div class="host-expand">
     <template v-if="!supported">
-      <div class="hint">当前厂商暂不支持在列表展开查看主机明细（仅阿里云 ECS / 腾讯云 CVM）。</div>
+      <div class="hint">当前厂商暂不支持在列表展开查看主机明细（支持：阿里云 ECS / 腾讯云 CVM / 火山引擎 ECS / 京东云 / 百度云 BCC）。</div>
     </template>
     <template v-else>
       <div class="bar">
@@ -32,7 +32,7 @@
           <div class="title">
             区域名称: {{ g.localName }}
             <el-button
-              v-if="isAli"
+              v-if="isAli || isVolc"
               size="small"
               type="primary"
               link
@@ -103,6 +103,7 @@ import { supportsHostExpand, fetchHostGroups } from '@/services/hostInventory'
 import {
   createEcsClientAli, aliDescribeCommands, aliDescribeInvocations
 } from '@/services/aliyun/ecs'
+import { volcDescribeInvocations } from '@/services/cloud'
 
 const props = defineProps({
   row: { type: Object, required: true },
@@ -113,6 +114,10 @@ const store = useVpsStore()
 
 const isAli = computed(() => props.row?.name === CLOUD_VPS.alibaba.name)
 const isTencent = computed(() => props.row?.name === CLOUD_VPS.tencent.name)
+const isVolc = computed(() => props.row?.name === CLOUD_VPS.volcengine.name)
+const isJd = computed(() => props.row?.name === CLOUD_VPS.jdcloud.name)
+const isBaidu = computed(() => props.row?.name === CLOUD_VPS.baidu.name)
+const isPubIpList = computed(() => isTencent.value || isVolc.value || isJd.value || isBaidu.value)
 const supported = computed(() => supportsHostExpand(props.row))
 
 const state = reactive({
@@ -170,14 +175,22 @@ function publicIps(r) {
     const eip = r.EipAddress?.IpAddress
     return eip ? [eip] : []
   }
-  if (isTencent.value) {
-    return Array.isArray(r.PublicIpAddresses) ? r.PublicIpAddresses.filter(Boolean) : []
+  if (isPubIpList.value) {
+    const arr = Array.isArray(r.PublicIpAddresses) ? r.PublicIpAddresses.filter(Boolean) : []
+    if (arr.length) return arr
+    const eip = r.EipAddress?.IpAddress
+    return eip ? [eip] : []
   }
   return r.PublicIpAddress ? [r.PublicIpAddress] : []
 }
 function hostSpec(r) {
   if (isAli.value) return `${r.Cpu ?? '—'}核${r.Memory ?? '—'}MB`
   if (isTencent.value) return `${r.CPU ?? r.Cpu ?? '—'}核${r.Memory ?? '—'}G`
+  if (isVolc.value || isJd.value || isBaidu.value) {
+    const cpu = r.Cpus ?? r.Cpu ?? '—'
+    const mem = r.MemorySize ?? r.Memory
+    return mem != null ? `${cpu}核${mem}MB` : `${cpu}核`
+  }
   return '—'
 }
 function osName(r) { return r.OSName || r.OsName || '—' }
@@ -237,13 +250,20 @@ async function load(force) {
 }
 
 async function showHistory(regionId) {
-  if (!isAli.value || !props.row || !regionId) return
+  if ((!isAli.value && !isVolc.value) || !props.row || !regionId) return
   histLoading.value = regionId
   try {
-    const c = createEcsClientAli(props.row.access_key, props.row.secret_key)
-    const cmds = await aliDescribeCommands(c, { RegionId: regionId, PageSize: 50, PageNumber: 1 })
-    const inv = await aliDescribeInvocations(c, { RegionId: regionId, PageSize: 50, PageNumber: 1 })
-    histText.value = JSON.stringify({ region: regionId, commands: cmds, invocations: inv }, null, 2)
+    if (isVolc.value) {
+      const inv = await volcDescribeInvocations(props.row, {
+        region: regionId, PageNumber: 1, PageSize: 50
+      })
+      histText.value = JSON.stringify({ region: regionId, invocations: inv }, null, 2)
+    } else {
+      const c = createEcsClientAli(props.row.access_key, props.row.secret_key)
+      const cmds = await aliDescribeCommands(c, { RegionId: regionId, PageSize: 50, PageNumber: 1 })
+      const inv = await aliDescribeInvocations(c, { RegionId: regionId, PageSize: 50, PageNumber: 1 })
+      histText.value = JSON.stringify({ region: regionId, commands: cmds, invocations: inv }, null, 2)
+    }
     histVisible.value = true
   } catch (e) {
     ElMessage.error(e.message || String(e))
